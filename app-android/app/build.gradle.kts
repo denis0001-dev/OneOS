@@ -134,6 +134,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "return_to_oneui.sh" to File(repoRoot, "switcher/assets/return_to_oneui.sh"),
     // 0.4.61 (pull request #58): Samsung rild's new-SMS queue bypass for the guest (inbound SMS).
     "libsec-ril-patch.sh" to File(repoRoot, "switcher/assets/libsec-ril-patch.sh"),
+    "oneos_guest_secims.sh" to File(repoRoot, "switcher/assets/oneos_guest_secims.sh"),
     "check_host_apex.sh" to File(repoRoot, "switcher/assets/check_host_apex.sh"),
     "bridges.sh" to File(repoRoot, "switcher/assets/bridges.sh"),
     "fold8_coloros.sh" to File(repoRoot, "switcher/assets/fold8_coloros.sh"),

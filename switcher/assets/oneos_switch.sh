@@ -93,7 +93,7 @@ fi
 [ -d "$STAGE" ] && [ ! -L "$STAGE" ] || refuse "$STAGE is missing or not a directory"
 root_only "$STAGE" || app_refuse "$STAGE is not root's or is writable by others ($(stat -c '%U:%G %A' "$STAGE" 2>/dev/null))"
 [ -f "$STAGE/system.raw" ] || refuse "the guest image ($STAGE/system.raw) is not staged"
-for f in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
+for f in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh oneos_guest_secims.sh \
          check_host_apex.sh bridges.sh fold8_coloros.sh guest_google.sh zygote_exec guards.txt services_patched.jar; do
     [ -f "$STAGE/$f" ] || refuse "$STAGE/$f is missing"
 done
@@ -110,24 +110,38 @@ GUARD_JARS="services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2
                                        $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                        $2 == "telephony-common_patched.jar" { print $2 }' "$STAGE/guards.txt")"
 
-# Experimental guest FRP policy (guest_no_frp_policy.py): local only, not in app
-# overlays. The app's prepare step restores the set's services_patched.jar;
-# data/oneos_frp_policy (one line: sha256) and attic/services_patched.frp.jar
-# put the patched jar back before files.sha256 is checked this switch.
+# Optional guest FRP override (guest_no_frp_policy.py): fork pixel9-sultra ships
+# the patch in the channel jar; use oneos_frp_policy + attic only for upstream
+# builds or experiments. data/oneos_frp_policy (one line: sha256) and
+# attic/services_patched.frp.jar put the patched jar back before files.sha256
+# is checked this switch.
 # Marker in /data/local/tmp survives stage immutable bits after a guest session.
 FRP_PATCH="/data/local/tmp/oneos_frp_policy"
 [ -f "$FRP_PATCH" ] || FRP_PATCH="$STAGE/data/oneos_frp_policy"
 FRP_JAR="$STAGE/attic/services_patched.frp.jar"
 if [ -f "$FRP_PATCH" ] && [ -f "$FRP_JAR" ]; then
-    FRP_SHA=$(head -1 "$FRP_PATCH" | awk '{print $1}')
-    case "$FRP_SHA" in
+    case "$(head -1 "$FRP_PATCH" | awk '{print $1}')" in
         ????????????????????????????????????????????????????????????????)
             if cp -f "$FRP_JAR" "$STAGE/services_patched.jar"; then
-                for f in files.sha256 guards.txt; do
-                    [ -f "$STAGE/$f" ] || continue
-                    sed -i "s/^[0-9a-f]\{64\}  services_patched\.jar/$FRP_SHA  services_patched.jar/" "$STAGE/$f"
-                done
-                echo "FRP policy: services_patched.jar from attic ($FRP_SHA)"
+                FRP_SHA=$(sha256sum "$STAGE/services_patched.jar" 2>/dev/null | cut -d' ' -f1)
+                case "$FRP_SHA" in
+                    ????????????????????????????????????????????????????????????????)
+                        for f in files.sha256 guards.txt; do
+                            [ -f "$STAGE/$f" ] || continue
+                            sed -i "s/^[0-9a-f]\{64\}  services_patched\.jar/$FRP_SHA  services_patched.jar/" "$STAGE/$f"
+                        done
+                        if [ -f "$STAGE/files.sha256" ] && [ -f "$STAGE/guards.txt" ]; then
+                            GSHA=$(sha256sum "$STAGE/guards.txt" 2>/dev/null | cut -d' ' -f1)
+                            case "$GSHA" in
+                                ????????????????????????????????????????????????????????????????)
+                                    sed -i "s/^[0-9a-f]\{64\}  guards\.txt/$GSHA  guards.txt/" "$STAGE/files.sha256"
+                                    ;;
+                            esac
+                        fi
+                        echo "FRP policy: services_patched.jar from attic ($FRP_SHA)"
+                        ;;
+                    *) echo "FRP policy: could not hash services_patched.jar after copy" ;;
+                esac
             else
                 echo "FRP policy: could not copy $FRP_JAR (stage not writable?)"
             fi
@@ -146,7 +160,7 @@ if [ "$APP" = 1 ]; then
     bad=$(awk 'NF != 2 || length($1) != 64 || $1 ~ /[^0-9a-f]/ || $2 !~ /^[A-Za-z0-9_][A-Za-z0-9._-]*$/ ||
                $2 == "system.raw" || seen[$2]++ { print NR ": " $0 }' "$SUMS" | head -3)
     [ -z "$bad" ] || refuse "files.sha256 has malformed lines: $bad"
-    for need in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh \
+    for need in oneos_switch.sh guest_prepare.sh guest_start.sh guest_props.sh return_to_oneui.sh libsec-ril-patch.sh oneos_guest_secims.sh \
                 check_host_apex.sh bridges.sh zygote_exec guards.txt $GUARD_JARS; do
         awk -v n="$need" '$2 == n { f = 1 } END { exit !f }' "$SUMS" || refuse "files.sha256 does not list $need"
     done
@@ -1065,6 +1079,37 @@ IMSW
         nohup /system/bin/sh /data/local/tmp/ims_watchdog.sh </dev/null >/dev/null 2>&1 &
     fi
     echo "imsd keepalive started (log: /data/local/tmp/ims_watchdog.log)"
+fi
+
+# --- GUEST SAMSUNG IMS MAINTAIN -------------------------------------------
+# Bootstrap runs once from the UI activator; this loop re-binds
+# com.sec.imsservice if the phone process restarts and retries ISIM_LOADED when
+# IMS registration was slow (inconsistent SMS/calls on S25 + Pixel guest).
+SECIMS_LAUNCH=0
+grep -qx 'ONEOS_GUEST_SEC_IMS=1' "$STAGE/session.env" 2>/dev/null && SECIMS_LAUNCH=1
+if [ "$SECIMS_LAUNCH" = 1 ] && ! ps -ef 2>/dev/null | grep -v grep | grep -q "secims_maintain.sh"; then
+    cat > /data/local/tmp/secims_maintain.sh <<'SECIMS'
+#!/system/bin/sh
+STAGE=/data/local/tmp/oneos
+LOG=/data/local/tmp/secims_maintain.log
+echo "# $(date) secims maintain: started" >> "$LOG"
+while true; do
+    sleep 60
+    [ -f "$STAGE/data/oneos_rec_stop" ] && exit 0
+    [ -s "$STAGE/guest_mntns" ] || exit 0
+    [ -e "$STAGE/data/oneos_sec_ims" ] && [ ! -L "$STAGE/data/oneos_sec_ims" ] || exit 0
+    P=$(pidof system_server | awk '{print $1}')
+    [ -n "$P" ] || continue
+    /system/bin/sh "$STAGE/oneos_guest_secims.sh" maintain_once "$P" >> "$LOG" 2>&1
+done
+SECIMS
+    chmod 755 /data/local/tmp/secims_maintain.sh
+    if command -v setsid >/dev/null 2>&1; then
+        setsid /system/bin/sh /data/local/tmp/secims_maintain.sh </dev/null >/dev/null 2>&1 &
+    else
+        nohup /system/bin/sh /data/local/tmp/secims_maintain.sh </dev/null >/dev/null 2>&1 &
+    fi
+    echo "Samsung IMS maintain started (log: /data/local/tmp/secims_maintain.log)"
 fi
 
 # The display reads from the start of the preflight must be complete before
@@ -2275,69 +2320,14 @@ while true; do
             # on or off, before HOME so the setup wizard's Wi-Fi page never shows
             # it: disabled (which also clears what runs 42 and 43 saved) unless
             # ONEOS_WIFI_VERBOSE=1.
-            # Samsung's IMS app in the guest (guest_prepare.sh, ONEOS_GUEST_SEC_IMS=1):
-            # the guest's telephony is told to bind it through the carrier config
-            # override, both slots, kept in the guest's carrier config store; then
-            # what the package manager and the ImsResolver made of it. The marker
-            # is in data the guest can write: -e and never a link (see the blur
-            # marker below).
+            # Samsung IMS in the guest (ONEOS_GUEST_SEC_IMS=1; oneos_guest_secims.sh).
             if [ -e $STAGE/data/oneos_sec_ims ] && [ ! -L $STAGE/data/oneos_sec_ims ]; then
-                # 0.4.38: ColorOS's device MMTEL ImsService is Qualcomm's org.codeaurora.ims,
-                # so its ImsResolver skipped Samsung's (F8U test10: IMS registered, never used,
-                # no SMS either way). test12: set-ims-service -d without -f answered true and
-                # left Qualcomm's bound; the carrier config route is refused for root. Now:
-                # (1) the device override with explicit features (0 emergency, 1 MMTEL);
-                # (2) if neither slot binds Samsung's, a fabricated overlay of the device
-                # setting config_ims_mmtel_package and a restart of the phone process, whose
-                # ImsResolver reads it at start. Each step and what is bound, logged.
+                /system/bin/sh $STAGE/oneos_guest_secims.sh bootstrap \$PID 2>&1 | sed 's/^/[UI Activator] /'
                 G=\"timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh\"
-                ims_bound() { \$G /system/bin/cmd phone ims get-ims-service -s \$1 -d -f 1 2>&1 | tr -d '\\r' | tail -1; }
-                SB=0
-                # 0.4.60: the phone service first (HyperOS S25 b474c339, A56 9c6b6ac3:
-                # slot 0 answered \"Can't find service: phone\" and never got IMS).
-                i=0; while [ \$i -lt 30 ] && ! \$G /system/bin/service check phone 2>/dev/null | grep -q ': found'; do sleep 2; i=\$((i + 1)); done
-                for s in 0 1; do
-                    for try in 1 2 3; do
-                        o=\$(\$G /system/bin/cmd phone ims set-ims-service -s \$s -d -f 0,1 com.sec.imsservice 2>&1 | tr '\\n' ' ' | cut -c1-120)
-                        case \"\$o\" in *\"find service\"*) sleep 5 ;; *) break ;; esac
-                    done
-                    echo \"[UI Activator] Samsung IMS: slot \$s override: \$o\"
-                    b=\$(ims_bound \$s); echo \"[UI Activator] Samsung IMS: slot \$s bound: \$b\"
-                    [ \"\$b\" = com.sec.imsservice ] && SB=1
-                done
-                if [ \$SB = 0 ]; then
-                    \$G /system/bin/cmd overlay fabricate --target android --name OneOSImsMmtel android:string/config_ims_mmtel_package string com.sec.imsservice >/dev/null 2>&1
-                    echo \"[UI Activator] Samsung IMS: device setting overlay: \$(\$G /system/bin/cmd overlay enable --user 0 com.android.shell:OneOSImsMmtel 2>&1 | tr '\\n' ' ' | cut -c1-120)\"
-                    PP=\$(\$G /system/bin/pidof com.android.phone 2>/dev/null)
-                    [ -n \"\$PP\" ] && \$G /system/bin/kill -9 \$PP 2>/dev/null
-                    sleep 15
-                    for s in 0 1; do
-                        \$G /system/bin/cmd phone ims set-ims-service -s \$s -d -f 0,1 com.sec.imsservice >/dev/null 2>&1
-                        echo \"[UI Activator] Samsung IMS: slot \$s bound after the phone restart: \$(ims_bound \$s)\"
-                    done
-                fi
-                echo \"[UI Activator] Samsung IMS: package \$(timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pm path com.sec.imsservice 2>/dev/null | head -1 | cut -c9-)\"
-                echo \"[UI Activator] Samsung IMS: mmtel override \$(timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd phone cc get-value -s 0 config_ims_mmtel_package_override_string 2>/dev/null | tail -1)\"
+                echo \"[UI Activator] Samsung IMS: package \$(\$G /system/bin/pm path com.sec.imsservice 2>/dev/null | head -1 | cut -c9-)\"
+                echo \"[UI Activator] Samsung IMS: mmtel override \$(\$G /system/bin/cmd phone cc get-value -s 0 config_ims_mmtel_package_override_string 2>/dev/null | tail -1)\"
                 timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys phone 2>/dev/null | grep -iE -m 6 'ImsResolver|imsservice|MmTel' | sed 's/^/[UI Activator] Samsung IMS: /'
-                # 0.4.39 (S25U AT&T report): One UI's telephony broadcasts
-                # android.intent.action.ISIM_LOADED once the SIM's ISIM files are read;
-                # the guest's AOSP telephony never does. Samsung IMS checks the ISIM once
-                # at SIM LOADED (0.46 s before the guest had read the IMPU), then waits
-                # for that broadcast forever: no registration, no calls or SMS on carriers
-                # with an ISIM. Sent here per slot with a loaded SIM, three times; IMS
-                # ignores it for a SIM without an ISIM app or once its ISIM is loaded.
-                ( for w in 10 30 90; do
-                    sleep \$w
-                    ss=\$(\$G /system/bin/getprop gsm.sim.state 2>/dev/null | tr -d '\\r')
-                    for s in 0 1; do
-                        st=\$(echo \"\$ss\" | cut -d, -f\$((s + 1)))
-                        [ \"\$st\" = LOADED ] || continue
-                        \$G /system/bin/am broadcast -a android.intent.action.ISIM_LOADED --ei phone \$s >/dev/null 2>&1
-                        echo \"[UI Activator] Samsung IMS: slot \$s ISIM_LOADED sent (after a \$w s wait)\"
-                    done
-                done ) &
             else
-                # Samsung IMS off: the device setting overlay of an earlier session goes.
                 timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/cmd overlay disable --user 0 com.android.shell:OneOSImsMmtel >/dev/null 2>&1
             fi
             if [ $WIFI_VERBOSE = 1 ]; then WV=enabled; else WV=disabled; fi

@@ -995,7 +995,7 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
 # service.incremental_patched.so are listed with the services_patched.jar that
 # looks up "gvld": guest_prepare.sh binds all three or none of them.
 {
-    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
+    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, guest_no_frp_policy, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
     [ "$VOLD_GVLD" = 1 ] && echo "# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)"
     # HyperOS images (miui-services_patched.jar) and Pixel images list their
     # files in the order and with the notes each set was built with.
