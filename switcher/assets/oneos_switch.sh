@@ -110,6 +110,32 @@ GUARD_JARS="services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2
                                        $2 == "framework_patched.jar" || $2 == "miui-wifi-service_patched.jar" || $2 == "miui-telephony-common_patched.jar" ||
                                        $2 == "telephony-common_patched.jar" { print $2 }' "$STAGE/guards.txt")"
 
+# Experimental guest FRP policy (guest_no_frp_policy.py): local only, not in app
+# overlays. The app's prepare step restores the set's services_patched.jar;
+# data/oneos_frp_policy (one line: sha256) and attic/services_patched.frp.jar
+# put the patched jar back before files.sha256 is checked this switch.
+# Marker in /data/local/tmp survives stage immutable bits after a guest session.
+FRP_PATCH="/data/local/tmp/oneos_frp_policy"
+[ -f "$FRP_PATCH" ] || FRP_PATCH="$STAGE/data/oneos_frp_policy"
+FRP_JAR="$STAGE/attic/services_patched.frp.jar"
+if [ -f "$FRP_PATCH" ] && [ -f "$FRP_JAR" ]; then
+    FRP_SHA=$(head -1 "$FRP_PATCH" | awk '{print $1}')
+    case "$FRP_SHA" in
+        ????????????????????????????????????????????????????????????????)
+            if cp -f "$FRP_JAR" "$STAGE/services_patched.jar"; then
+                for f in files.sha256 guards.txt; do
+                    [ -f "$STAGE/$f" ] || continue
+                    sed -i "s/^[0-9a-f]\{64\}  services_patched\.jar/$FRP_SHA  services_patched.jar/" "$STAGE/$f"
+                done
+                echo "FRP policy: services_patched.jar from attic ($FRP_SHA)"
+            else
+                echo "FRP policy: could not copy $FRP_JAR (stage not writable?)"
+            fi
+            ;;
+        *) echo "FRP policy: ignored (oneos_frp_policy needs a 64-char sha256)" ;;
+    esac
+fi
+
 if [ "$APP" = 1 ]; then
     # Every staged file (files.sha256, written by the app's root script; all
     # but system.raw) is checked, not only the two guarded jars: the scripts,
