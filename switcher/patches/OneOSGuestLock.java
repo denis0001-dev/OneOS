@@ -24,7 +24,8 @@ import javax.crypto.spec.SecretKeySpec;
  * restart of the phone goes back to One UI, where root can remove the record (that is also the
  * way out of a forgotten lock). The record keeps a salted, slow hash, never the credential.
  *
- * Record, one ASCII line: "1 <type> <iterations> <salt hex> <hash hex>", written to a temporary
+     * Record, one ASCII line: "1 <type> <iterations> <salt hex> <hash hex> [<pin length>]",
+     * written to a temporary
  * file, synced and renamed. hash = PBKDF2-HMAC-SHA256 over the lower-case hex of
  * SHA-256(credential), 32 bytes. A record that cannot be read counts as no lock.
  *
@@ -44,6 +45,8 @@ public final class OneOSGuestLock {
     public static final long NOT_SET = -1L;
     /** verify(): the credential matched. */
     public static final long MATCH = 0L;
+    /** verify(): PIN not long enough yet; do not count a try or show "wrong". */
+    public static final long INCOMPLETE = -3L;
     // verify() > 0: a wrong guess; (result - 1) ms to wait before the next one, may be 0.
     // verify() < -1: not looked at, a wait is running; (-result - 2) ms are left.
 
@@ -70,10 +73,14 @@ public final class OneOSGuestLock {
     private static int sIterations;
     private static byte[] sSalt;
     private static byte[] sHash;
+    /** For TYPE_PIN, how many digits Keyguard should collect before verify (from the record). */
+    private static int sPinLength;
     private static boolean sTriesLoaded;
     private static int sFailures;
     /** Elapsed-realtime ms until which no guess is looked at; 0 when no wait is running. */
     private static long sLockedUntil;
+    /** lastModified and size of the record file; external edits are seen on the next verify. */
+    private static long sRecordStamp;
 
     private OneOSGuestLock() {
     }
@@ -88,6 +95,31 @@ public final class OneOSGuestLock {
         sTriesLoaded = false;
         sFailures = 0;
         sLockedUntil = 0;
+        sRecordStamp = 0;
+        sPinLength = 0;
+    }
+
+    /**
+     * What ILockSettings.getPinLength() answers for user 0 when a guest PIN is set. Returns -1
+     * when the framework should use its own path (no guest lock or not a PIN).
+     */
+    public static int pinLengthForUser(int userId) {
+        if (userId != 0) {
+            return -1;
+        }
+        try {
+            if (!sLoaded) {
+                synchronized (OneOSGuestLock.class) {
+                    loadRecord();
+                }
+            }
+            if (sType == TYPE_PIN && sPinLength >= MIN_LENGTH) {
+                return sPinLength;
+            }
+            return -1;
+        } catch (Throwable t) {
+            return -1;
+        }
     }
 
     /**
@@ -134,6 +166,25 @@ public final class OneOSGuestLock {
      * @param elapsed SystemClock.elapsedRealtime()
      * @param wall    System.currentTimeMillis()
      */
+    /** A guess at the on-disk hash without touching the rate limiter (for change/remove only). */
+    private static boolean credentialMatches(byte[] credential) {
+        if (credential == null || credential.length == 0) {
+            return false;
+        }
+        try {
+            loadRecord();
+            if (sType == TYPE_NONE || sSalt == null || sHash == null) {
+                return false;
+            }
+            byte[] hash = derive(credential, sSalt, sIterations);
+            boolean match = MessageDigest.isEqual(hash, sHash);
+            Arrays.fill(hash, (byte) 0);
+            return match;
+        } catch (Throwable t) {
+            return false;
+        }
+    }
+
     public static synchronized long verify(byte[] credential, long elapsed, long wall) {
         try {
             loadRecord();
@@ -148,6 +199,9 @@ public final class OneOSGuestLock {
             sLockedUntil = 0;
             if (credential == null || credential.length == 0) {
                 return 1L;
+            }
+            if (sType == TYPE_PIN && credential.length < pinLengthForType()) {
+                return INCOMPLETE;
             }
             int failures = sFailures < MAX_FAILURES ? sFailures + 1 : MAX_FAILURES;
             long timeout = timeoutMs(failures);
@@ -171,7 +225,7 @@ public final class OneOSGuestLock {
 
     /**
      * Sets, changes or removes user 0's guest lock. With a lock set, the saved credential has to
-     * match first (one guess, counted like any other).
+     * match first (checked without the bouncer rate limiter so Settings can change the lock).
      *
      * @param newType LockPatternUtils.CREDENTIAL_TYPE_* of the new credential; NONE removes
      */
@@ -185,8 +239,15 @@ public final class OneOSGuestLock {
                 if (remove) {
                     return CHANGE_NOT_HANDLED;
                 }
-            } else if (verify(savedCredential, elapsed, wall) != MATCH) {
-                return CHANGE_REFUSED;
+            } else {
+                loadTries(elapsed, wall);
+                long left = sLockedUntil - elapsed;
+                if (sLockedUntil != 0 && left > 0) {
+                    return CHANGE_REFUSED;
+                }
+                if (!credentialMatches(savedCredential)) {
+                    return CHANGE_REFUSED;
+                }
             }
             if (remove) {
                 return forget() ? CHANGE_DONE : CHANGE_REFUSED;
@@ -200,10 +261,15 @@ public final class OneOSGuestLock {
             byte[] salt = new byte[16];
             new SecureRandom().nextBytes(salt);
             byte[] hash = derive(newCredential, salt, ITERATIONS);
-            String line = "1 " + newType + " " + ITERATIONS + " " + hex(salt) + " " + hex(hash)
-                    + "\n";
+            StringBuilder line = new StringBuilder("1 ").append(newType).append(' ')
+                    .append(ITERATIONS).append(' ').append(hex(salt)).append(' ')
+                    .append(hex(hash));
+            if (newType == TYPE_PIN) {
+                line.append(' ').append(newCredential.length);
+            }
+            line.append('\n');
             Arrays.fill(hash, (byte) 0);
-            if (!writeFile(RECORD, line, true)) {
+            if (!writeFile(RECORD, line.toString(), true)) {
                 return CHANGE_REFUSED;
             }
             // What is on the disk is what the next unlock gets: read it back and try it.
@@ -221,6 +287,7 @@ public final class OneOSGuestLock {
             }
             sFailures = 0;
             sLockedUntil = 0;
+            sTriesLoaded = false;
             new File(sDir, TRIES).delete();
             return CHANGE_DONE;
         } catch (Throwable t) {
@@ -241,12 +308,30 @@ public final class OneOSGuestLock {
         sHash = null;
         sFailures = 0;
         sLockedUntil = 0;
+        sTriesLoaded = false;
         sLoaded = true;
+        sPinLength = 0;
         return true;
     }
 
+    private static int pinLengthForType() {
+        if (sPinLength >= MIN_LENGTH) {
+            return sPinLength;
+        }
+        return MIN_LENGTH;
+    }
+
+    private static long recordStamp(File record) {
+        if (!record.isFile()) {
+            return 0;
+        }
+        return record.lastModified() ^ (record.length() << 20);
+    }
+
     private static void loadRecord() {
-        if (sLoaded) {
+        File record = new File(sDir, RECORD);
+        long stamp = recordStamp(record);
+        if (sLoaded && stamp == sRecordStamp) {
             return;
         }
         int type = TYPE_NONE;
@@ -257,7 +342,7 @@ public final class OneOSGuestLock {
             String text = readFile(RECORD);
             if (text != null) {
                 String[] f = text.trim().split(" ");
-                if (f.length == 5 && f[0].equals("1")) {
+                if ((f.length == 5 || f.length == 6) && f[0].equals("1")) {
                     int t = Integer.parseInt(f[1]);
                     int n = Integer.parseInt(f[2]);
                     byte[] s = unhex(f[3]);
@@ -265,10 +350,29 @@ public final class OneOSGuestLock {
                     if ((t == TYPE_PATTERN || t == TYPE_PIN || t == TYPE_PASSWORD)
                             && n >= 1000 && n <= 10000000
                             && s != null && s.length == 16 && h != null && h.length == 32) {
-                        type = t;
-                        iterations = n;
-                        salt = s;
-                        hash = h;
+                        int pinLen = 0;
+                        boolean recordOk = true;
+                        if (t == TYPE_PIN) {
+                            if (f.length == 6) {
+                                pinLen = Integer.parseInt(f[5]);
+                                if (pinLen < MIN_LENGTH || pinLen > 64) {
+                                    recordOk = false;
+                                }
+                            } else {
+                                recordOk = false;
+                            }
+                        } else if (f.length != 5) {
+                            recordOk = false;
+                        }
+                        if (recordOk) {
+                            type = t;
+                            iterations = n;
+                            salt = s;
+                            hash = h;
+                            if (t == TYPE_PIN) {
+                                sPinLength = pinLen;
+                            }
+                        }
                     }
                 }
             }
@@ -279,6 +383,12 @@ public final class OneOSGuestLock {
         sSalt = salt;
         sHash = hash;
         sType = type;
+        if (type != TYPE_PIN) {
+            sPinLength = 0;
+        } else if (sPinLength < MIN_LENGTH) {
+            sPinLength = MIN_LENGTH;
+        }
+        sRecordStamp = stamp;
         sLoaded = true;
     }
 

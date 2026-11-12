@@ -13,7 +13,7 @@ encryption, or a credential the keystore knows. A restart of the phone goes back
 which has no lock, and root there reaches the guest's data and can remove the record (that is
 also the way out of a forgotten lock: delete oneos_guest_lock* in the guest's data/system).
 
-Six changes, all or none:
+Nine changes, all or none:
 
 1. LockSettingsService.setLockCredentialInternal: in front of the gatekeeper guard, the added
    method oneosGuestLockSet asks OneOSGuestLock.change() for user 0. Done -> true (the public
@@ -31,16 +31,22 @@ Six changes, all or none:
    when one is set. The lock screen, Settings, WindowManager and TrustManager read it through
    LockPatternUtils; getCredentialTypeInternal and with it the service's own state (synthetic
    password, CE storage, isUserSecure) stay "none", as in every guest so far.
-4. LockSettingsService.enforceFrpNotActive returns at its entry. Its only caller is
+4. LockSettingsService.getPinLength: when a guest PIN is set, its length from the record. Without
+   this the framework returns -1 and Keyguard verifies after every digit ("wrong password").
+5. LockSettingsService.getUserPasswordMetrics: when a guest PIN is set, a PasswordMetrics with that
+   length (built in the service smali) so SystemUI shows the dot row and auto-submits.
+6. LockSettingsService.getBoolean: for lockscreen.auto_pin_confirm with a guest PIN set, true
+   (SystemUI's isAutoPinConfirmEnabled reads this; the guest record never sets it otherwise).
+7. LockSettingsService.enforceFrpNotActive returns at its entry. Its only caller is
    setLockCredential. "FRP active" in the guest only says that the guest could not read One
    UI's FRP secret (guest_pdb_readonly.py, guest_pdb_init_survives.py: A36, A54, A56), and the
    only lock that can be set behind the check is the guest's own record; with the check, those
    phones would get a SecurityException in Settings.
-5. TrustManagerService.notifyKeystoreOfDeviceLockState: a "locked" report is dropped. With a
+8. TrustManagerService.notifyKeystoreOfDeviceLockState: a "locked" report is dropped. With a
    guest lock the guest's device becomes "locked" for the first time, and that report would
    make the phone's keystore daemon drop user 0's unlocked-device-required keys, which only a
    real unlock of the phone gives back. The "unlocked" report is what a guest sends today.
-6. biometrics/PreAuthInfo: "a device credential is available" is false. A credential prompt of
+9. biometrics/PreAuthInfo: "a device credential is available" is false. A credential prompt of
    an app (BiometricPrompt with DEVICE_CREDENTIAL) ends in SystemUI asking the gatekeeper for a
    token, which the guest lock cannot give (ColorOS SystemUI throws on the missing token). So
    such prompts answer what they answer today, without a lock: no credential enrolled. A
@@ -195,6 +201,87 @@ def verify_hook():
     return-object v0
 
     :oneos_gl_native""".split("\n")
+
+
+AUTO_PIN_CONFIRM_KEY = "lockscreen.auto_pin_confirm"
+
+
+def get_boolean_hook():
+    return f"""\
+
+    # OneOS: auto-submit on the last PIN digit (patches/guest_local_lock.py).
+    const-string v0, "{AUTO_PIN_CONFIRM_KEY}"
+
+    invoke-virtual {{p1, v0}}, Ljava/lang/String;->equals(Ljava/lang/Object;)Z
+
+    move-result v0
+
+    if-eqz v0, :oneos_gl_gbool_done
+
+    invoke-static {{p3}}, {HELPER}->pinLengthForUser(I)I
+
+    move-result v0
+
+    if-ltz v0, :oneos_gl_gbool_done
+
+    const/4 p0, 0x1
+
+    return p0
+
+    :oneos_gl_gbool_done""".split("\n")
+
+
+def password_metrics_hook():
+    pm = "Landroid/app/admin/PasswordMetrics;"
+    return f"""\
+
+    # OneOS: guest PIN metrics for SystemUI (patches/guest_local_lock.py).
+    :oneos_gl_metrics_start
+    invoke-static {{p1}}, {HELPER}->pinLengthForUser(I)I
+
+    move-result v0
+
+    if-ltz v0, :oneos_gl_metrics_done
+
+    new-instance v1, {pm}
+
+    const/4 v2, 0x3
+
+    invoke-direct {{v1, v2}}, {pm}-><init>(I)V
+
+    iput v0, v1, {pm}->length:I
+
+    return-object v1
+    :oneos_gl_metrics_end
+    .catch Ljava/lang/Throwable; {{:oneos_gl_metrics_start .. :oneos_gl_metrics_end}} :oneos_gl_metrics_catch
+
+    :oneos_gl_metrics_catch
+    move-exception v0
+
+    :oneos_gl_metrics_done""".split("\n")
+
+
+def pin_length_hook():
+    return f"""\
+
+    # OneOS: guest PIN length from the record (patches/guest_local_lock.py); -1 keeps the path below.
+    :oneos_gl_pin_start
+    invoke-static {{p1}}, {HELPER}->pinLengthForUser(I)I
+
+    move-result v0
+
+    if-ltz v0, :oneos_gl_pin_done
+
+    return v0
+    :oneos_gl_pin_end
+    .catch Ljava/lang/Throwable; {{:oneos_gl_pin_start .. :oneos_gl_pin_end}} :oneos_gl_pin_catch
+
+    :oneos_gl_pin_catch
+    move-exception v0
+
+    goto :oneos_gl_pin_done
+
+    :oneos_gl_pin_done""".split("\n")
 
 
 def type_hook(result, spare):
@@ -387,11 +474,20 @@ def added_methods(invalidate, listeners, strong):
 
     if-eqz v4, :oneos_gl_native
 
+    const-wide/16 v2, -0x3
+
+    cmp-long v4, v0, v2
+
+    if-eqz v4, :oneos_gl_incomplete
+
     const-wide/16 v2, 0x0
 
     cmp-long v4, v0, v2
 
     if-nez v4, :oneos_gl_failed
+
+    :oneos_gl_incomplete
+    return-object v7
 
     # A match. AOSP's lock screen opens on this callback, not on the result.
     if-eqz p3, :oneos_gl_matched
@@ -499,6 +595,9 @@ def patch_lss(lines, rel, pkg_text):
     s_i, s_end, s_locals = method(lines, "setLockCredentialInternal", f"({CRED}{CRED}IZ)Z", rel)
     v_i, v_end, v_locals = method(lines, "doVerifyCredential", f"({CRED}I{CALLBACK}I){VCR}", rel)
     t_i, t_end, t_locals = method(lines, "getCredentialType", "(I)I", rel)
+    p_i, p_end, p_locals = method(lines, "getPinLength", "(I)I", rel)
+    um_i, um_end, um_locals = method(lines, "getUserPasswordMetrics", "(I)Landroid/app/admin/PasswordMetrics;", rel)
+    gb_i, gb_end, gb_locals = method(lines, "getBoolean", "(Ljava/lang/String;ZI)Z", rel)
     f_i, f_end, _ = method(lines, "enforceFrpNotActive", "()V", rel)
     inv_i, _, _ = method(lines, "invalidateCredentialTypeCaches", "(I)V", rel)
     lis_i, _, _ = method(lines, "notifyLockSettingsStateListeners", "(ZI)V", rel)
@@ -532,7 +631,42 @@ def patch_lss(lines, rel, pkg_text):
         raise Skip(f"{rel}: getCredentialType has labels of its own")
     front, back = type_hook(m.group(1), f"v{t_locals}")
 
-    # 4. The FRP check.
+    # 4. getPinLength: after checkHavePermission(), override when a guest PIN is set.
+    p_at = entry(lines, p_i)
+    p_code = code(lines, p_i, p_end)
+    perm = re.compile(r"invoke-(?:direct|virtual) \{p0\}, " + re.escape(LSS)
+                      + r"->checkHavePermission\(\)V")
+    if not p_code or not perm.fullmatch(p_code[0][1]):
+        raise Skip(f"{rel}: getPinLength does not start with checkHavePermission")
+    if p_locals > 8:
+        raise Skip(f"{rel}: getPinLength has no spare register for the hook")
+    pin_front = pin_length_hook()
+
+    # 5. getUserPasswordMetrics: guest PIN metrics before isUserSecure (v0 free at entry).
+    um_at = entry(lines, um_i)
+    um_code = code(lines, um_i, um_end)
+    isec = re.compile(r"invoke-(?:direct|virtual) \{p0, p1\}, " + re.escape(LSS)
+                     + r"->isUserSecure\(I\)Z")
+    if not um_code or not isec.fullmatch(um_code[0][1]):
+        raise Skip(f"{rel}: getUserPasswordMetrics does not start with isUserSecure")
+    if um_locals > 8:
+        raise Skip(f"{rel}: getUserPasswordMetrics has no spare register for the hook")
+    metrics_front = password_metrics_hook()
+    if um_locals < 2:
+        raise Skip(f"{rel}: getUserPasswordMetrics needs two locals for the metrics hook")
+
+    # 6. getBoolean: auto_pin_confirm for guest PIN (SystemUI isAutoPinConfirmEnabled).
+    gb_at = entry(lines, gb_i)
+    gb_code = code(lines, gb_i, gb_end)
+    perm_b = re.compile(r"invoke-(?:direct|virtual) \{p0, p1, p3\}, " + re.escape(LSS)
+                        + r"->checkDatabaseReadPermission\(Ljava/lang/String;I\)V")
+    if not gb_code or not perm_b.fullmatch(gb_code[0][1]):
+        raise Skip(f"{rel}: getBoolean does not start with checkDatabaseReadPermission")
+    if gb_locals > 8:
+        raise Skip(f"{rel}: getBoolean has no spare register for the hook")
+    gbool_front = get_boolean_hook()
+
+    # 7. The FRP check.
     f_at = entry(lines, f_i)
 
     edits = [
@@ -541,6 +675,11 @@ def patch_lss(lines, rel, pkg_text):
         (t_i + 1, t_i + 2, [f"    .locals {t_locals + 1}"]),
         (t_code[-2][0] + 1, t_code[-2][0] + 1, front),
         (t_code[-1][0] + 1, t_code[-1][0] + 1, back),
+        (p_code[0][0] + 1, p_code[0][0] + 1, pin_front),
+        (um_i + 1, um_i + 2, [f"    .locals {max(um_locals, 3)}"]),
+        (um_at, um_at, metrics_front),
+        (gb_i + 1, gb_i + 2, [f"    .locals {max(gb_locals, 1)}"]),
+        (gb_at, gb_at, gbool_front),
         (f_at, f_at, FRP_HOOK),
     ]
     for first, last, new in sorted(edits, reverse=True):
@@ -548,6 +687,57 @@ def patch_lss(lines, rel, pkg_text):
     while lines and lines[-1] == "":
         lines.pop()
     lines += tail + [""]
+    return lines
+
+
+def patch_lss_pin_metrics(lines, rel):
+    """Add getPinLength, getUserPasswordMetrics and getBoolean hooks (upgrade partial trees)."""
+    p_i, p_end, p_locals = method(lines, "getPinLength", "(I)I", rel)
+    um_i, um_end, um_locals = method(lines, "getUserPasswordMetrics", "(I)Landroid/app/admin/PasswordMetrics;", rel)
+    gb_i, gb_end, gb_locals = method(lines, "getBoolean", "(Ljava/lang/String;ZI)Z", rel)
+
+    if "oneos_gl_gbool_done" in "\n".join(lines):
+        raise Skip(f"{rel}: PIN metrics hooks already present")
+
+    p_at = entry(lines, p_i)
+    p_code = code(lines, p_i, p_end)
+    perm = re.compile(r"invoke-(?:direct|virtual) \{p0\}, " + re.escape(LSS)
+                      + r"->checkHavePermission\(\)V")
+    if not p_code or not perm.fullmatch(p_code[0][1]):
+        raise Skip(f"{rel}: getPinLength does not start with checkHavePermission")
+    if p_locals > 8:
+        raise Skip(f"{rel}: getPinLength has no spare register for the hook")
+    pin_front = pin_length_hook()
+
+    um_at = entry(lines, um_i)
+    um_code = code(lines, um_i, um_end)
+    isec = re.compile(r"invoke-(?:direct|virtual) \{p0, p1\}, " + re.escape(LSS)
+                      + r"->isUserSecure\(I\)Z")
+    if not um_code or not isec.fullmatch(um_code[0][1]):
+        raise Skip(f"{rel}: getUserPasswordMetrics does not start with isUserSecure")
+    if um_locals > 8:
+        raise Skip(f"{rel}: getUserPasswordMetrics has no spare register for the hook")
+    metrics_front = password_metrics_hook()
+
+    gb_at = entry(lines, gb_i)
+    gb_code = code(lines, gb_i, gb_end)
+    perm_b = re.compile(r"invoke-(?:direct|virtual) \{p0, p1, p3\}, " + re.escape(LSS)
+                        + r"->checkDatabaseReadPermission\(Ljava/lang/String;I\)V")
+    if not gb_code or not perm_b.fullmatch(gb_code[0][1]):
+        raise Skip(f"{rel}: getBoolean does not start with checkDatabaseReadPermission")
+    if gb_locals > 8:
+        raise Skip(f"{rel}: getBoolean has no spare register for the hook")
+    gbool_front = get_boolean_hook()
+
+    edits = [
+        (p_code[0][0] + 1, p_code[0][0] + 1, pin_front),
+        (um_i + 1, um_i + 2, [f"    .locals {max(um_locals, 3)}"]),
+        (um_at, um_at, metrics_front),
+        (gb_i + 1, gb_i + 2, [f"    .locals {max(gb_locals, 1)}"]),
+        (gb_at, gb_at, gbool_front),
+    ]
+    for first, last, new in sorted(edits, reverse=True):
+        lines[first:last] = new
     return lines
 
 
@@ -604,8 +794,16 @@ def main(root, helper):
                 any(os.path.isfile(os.path.join(root, d, PKG, HELPER_NAME))
                     for d in os.listdir(root) if d.startswith("smali"))]
         if all(have):
-            print("guest_local_lock: this services.jar already has the guest screen lock",
+            if "oneos_gl_gbool_done" in text[LSS_REL]:
+                print("guest_local_lock: this services.jar already has the guest screen lock",
+                      file=sys.stderr)
+                return
+            new_lss = patch_lss_pin_metrics(text[LSS_REL].split("\n"), LSS_REL)
+            with open(paths[LSS_REL], "w") as f:
+                f.write("\n".join(new_lss))
+            print("guest_local_lock: upgraded PIN length, PasswordMetrics and auto_pin_confirm",
                   file=sys.stderr)
+            print(dirs[LSS_REL])
             return
         if any(have):
             fail("parts of the guest screen lock are already in this tree")

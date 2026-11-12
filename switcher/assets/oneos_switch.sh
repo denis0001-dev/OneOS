@@ -2620,16 +2620,20 @@ while true; do
                 esac
             fi
             $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/input keyevent 224
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/input keyevent 82
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/am unlock-user 0
-            $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/am start -a android.intent.action.MAIN -c android.intent.category.HOME
             # Setup is marked done before boot (guest_prepare.sh), so ColorOS shows
             # its swipe keyguard when there is no credential in the guest; with the
             # guest's own screen lock (patches/guest_local_lock.py) leave the bouncer up.
-            if [ ! -f "$STAGE/data/system/oneos_guest_lock" ]; then
+            if [ ! -f $STAGE/data/system/oneos_guest_lock ]; then
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/input keyevent 82
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/am unlock-user 0
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/am start -a android.intent.action.MAIN -c android.intent.category.HOME
                 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/wm dismiss-keyguard 2>/dev/null || true
             else
-                echo "[UI Activator] guest screen lock set; keyguard not dismissed"
+                echo \"[UI Activator] guest screen lock set, bouncer stays up (no unlock-user / dismiss)\"
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/am start -a android.intent.action.MAIN -c android.intent.category.HOME
+                # PIN dots / auto-submit: guest_local_lock.py + lockscreen.auto_pin_confirm.
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put secure lockscreen.auto_pin_confirm 1 2>/dev/null || true
+                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pkill -TERM com.android.systemui 2>/dev/null || true
             fi
             # The guest's updaters could hand an OTA to the phone's own
             # update_engine: ColorOS's, Pixel's factory OTA and Infinity-X's
