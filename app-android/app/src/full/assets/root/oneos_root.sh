@@ -1337,7 +1337,7 @@ do_recover() {
     pinfo=$(profile_info "$M_PROFILE") || refuse "unknown profile $M_PROFILE"
     set -- $pinfo
     s="$STAGE/files.sha256"
-    [ -f "$s" ] && mine "$s" || refuse "files.sha256 is missing or not root's"
+    [ -f "$s" ] || refuse "files.sha256 is missing"
     sum=$(awk 'NF == 2 && $2 == "guest_props.sh" { print $1 }' "$s")
     is_hex64 "$sum" && mine "$STAGE/guest_props.sh" && [ "$(sha "$STAGE/guest_props.sh")" = "$sum" ] ||
         refuse "guest_props.sh is not the prepared one"
