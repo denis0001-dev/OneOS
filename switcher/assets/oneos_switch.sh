@@ -2091,26 +2091,6 @@ while true; do
             setprop service.bootanim.exit 1
             kill -9 \$(pidof bootanimation) 2>/dev/null
             sleep 1
-            # Guest audio: once per activator pass, restart the shared HAL then the
-            # guest audioserver. After a soft reboot the guest process can register
-            # without a working primary output until this runs (Pixel 9 guest).
-            if [ \"${ONEOS_GUEST_AUDIO:-1}\" = 1 ]; then
-                setprop ctl.restart vendor.audio-hal-aidl 2>/dev/null || true
-                n=0
-                while [ \$n -lt 30 ]; do
-                    timeout 3 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh service check android.hardware.audio.core.IModule/default 2>/dev/null | grep -q ': found' && break
-                    n=\$((n + 1)); sleep 0.2
-                done
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pkill -9 audioserver 2>/dev/null || true
-                sleep 1
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/audioserver >/dev/null 2>&1 &
-                n=0
-                while [ \$n -lt 40 ]; do
-                    timeout 3 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh service check media.audio_policy 2>/dev/null | grep -q ': found' && break
-                    n=\$((n + 1)); sleep 0.5
-                done
-                echo \"[UI Activator] guest audio: \$(timeout 3 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh service check media.audio_policy 2>&1 | head -1)\"
-            fi
             # The screen's own timeout and the user's stay-awake choice: up to
             # 0.4.34 every boot forced stay awake on any charger (svc power stayon,
             # stay_on_while_plugged_in 7) and a timeout of 2^31-1 ms, left from
@@ -3017,14 +2997,6 @@ while true; do
                 ON=''
                 for o in \$OVS; do gxo enable --user 0 com.android.shell:\$o && ON=\"\$ON \$o\"; done
                 echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRC:-?} px; overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
-                case \"\$ON\" in *OneOSStatusBarHeight*|*OneOSCornerRadius*) ;;
-                    *)
-                        APPLY=$STAGE/apply-host-cutout-overlays.sh
-                        [ -f \"\$APPLY\" ] || APPLY=$STAGE/data/apply-host-cutout-overlays.sh
-                        if [ $GUEST_AOSP_SYSUI = 1 ] && [ -f \"\$APPLY\" ] && [ -f $STAGE/data/oneos_overlay_dimen.dex ]; then
-                            /system/bin/sh \"\$APPLY\" 2>&1 | sed 's/^/[UI Activator] status bar: /'
-                        fi ;;
-                esac
             else
                 # No host cutout this session (ONEOS_GUEST_HOST_CUTOUT=0, or a
                 # phone with two panels): an earlier session's overlays go off.
@@ -3049,12 +3021,6 @@ while true; do
                                  fi ;;
                     *) echo \"[UI Activator] corner radius: !!! not made (\$CRAD px): \${r:-no answer}\" ;;
                 esac
-            fi
-            if [ -f $STAGE/data/system/oneos_guest_lock ]; then
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put secure lockscreen.auto_pin_confirm 1 2>/dev/null || true
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/pkill -TERM com.android.systemui 2>/dev/null || true
-                sleep 2
-                echo '[UI Activator] guest screen lock: PIN auto-submit and SystemUI refreshed (after status bar)'
             fi
             # OxygenOS's status bar on another phone's panel, the second way (0.4.90).
             # Its SystemUI takes the width it sorts the camera hole by from the

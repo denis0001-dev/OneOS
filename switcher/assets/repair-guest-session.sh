@@ -1,8 +1,10 @@
 #!/system/bin/sh
-# One-off: restart guest UI activator, audio, and host cutout overlays (running session).
+# Emergency repair only: restarts audio, SystemUI and the UI activator (expect a visible glitch).
+# A normal switch already applies overlays and guest audio handover without these steps.
 set -eu
 STAGE=/data/local/tmp/oneos
-BB=$(which busybox)
+BB=$(which busybox 2>/dev/null)
+[ -n "$BB" ] || BB=/data/adb/ksu/bin/busybox
 PID=$(pidof system_server | awk '{print $1}')
 [ -n "$PID" ] || { echo "no guest system_server"; exit 1; }
 run() { "$BB" nsenter -t "$PID" -m /system/bin/sh /data/oneos_genv.sh "$@"; }
@@ -26,6 +28,7 @@ done
 echo "media.audio_policy: $(run service check media.audio_policy 2>/dev/null | head -1)"
 
 OVERLAY_SH="$STAGE/apply-host-cutout-overlays.sh"
+[ -f "$OVERLAY_SH" ] || OVERLAY_SH="$STAGE/data/apply-host-cutout-overlays.sh"
 [ -f "$OVERLAY_SH" ] || OVERLAY_SH=/data/local/tmp/apply-host-cutout-overlays.sh
 if [ -f "$OVERLAY_SH" ]; then
     echo "=== overlays"
