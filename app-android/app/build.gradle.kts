@@ -511,7 +511,7 @@ android {
         // launch) left the boot screen on "Shutting down One UI" for good, the reason only in the log (a
         // Galaxy S23 on 0.4.95, twice: One UI's property space nearly full). Root's launch answer now waits
         // for that verdict (switch_verdict in oneos_root.sh) and passes a refusal on. Not tried on a phone yet.
-        versionCode = 132
+        versionCode = 134
         versionName = "0.4.96"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.

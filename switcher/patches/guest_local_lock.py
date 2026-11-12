@@ -790,17 +790,35 @@ def main(root, helper):
         text = {rel: read(paths[rel]) for rel in dirs}
         helper_out = os.path.join(root, dirs[LSS_REL], PKG, HELPER_NAME)
 
+        def helper_paths():
+            for d in os.listdir(root):
+                if not d.startswith("smali"):
+                    continue
+                p = os.path.join(root, d, PKG, HELPER_NAME)
+                if os.path.isfile(p):
+                    yield p
+
+        # One incomplete copy in another dex (e.g. smali_classes5) wins the classloader and
+        # crashes system_server with NoSuchMethodError on pinLengthForUser.
+        for stale in helper_paths():
+            if os.path.abspath(stale) != os.path.abspath(helper_out):
+                os.remove(stale)
+
         have = [MARK in text[LSS_REL], KEYSTORE_TEXT in text[TMS_REL],
-                any(os.path.isfile(os.path.join(root, d, PKG, HELPER_NAME))
-                    for d in os.listdir(root) if d.startswith("smali"))]
+                os.path.isfile(helper_out)]
         if all(have):
             if "oneos_gl_gbool_done" in text[LSS_REL]:
+                shutil.copy(helper, helper_out)
                 print("guest_local_lock: this services.jar already has the guest screen lock",
                       file=sys.stderr)
+                # The helper's dex still has to be rebuilt into the jar. Returning
+                # without the directory left OneOSGuestLock out of services_patched.jar.
+                print(dirs[LSS_REL])
                 return
             new_lss = patch_lss_pin_metrics(text[LSS_REL].split("\n"), LSS_REL)
             with open(paths[LSS_REL], "w") as f:
                 f.write("\n".join(new_lss))
+            shutil.copy(helper, helper_out)
             print("guest_local_lock: upgraded PIN length, PasswordMetrics and auto_pin_confirm",
                   file=sys.stderr)
             print(dirs[LSS_REL])

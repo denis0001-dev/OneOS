@@ -67,13 +67,23 @@ object AppAssets {
     /** The session scripts and host_installd.txt, then the set's files, in staging order. */
     fun files(ctx: Context, set: PackageSet, profile: String): List<Staged> {
         val scripts = list(ctx, "scripts")
-        val channel = PatchChannels.snapshot(ctx, set, profile)
         val base = list(ctx, set.id)
+        val size = sizes(ctx)
+        var channel = PatchChannels.snapshot(ctx, set, profile)
+        if (channel != null) {
+            val pack = packed(ctx)
+            val ids = remoteIds(ctx)
+            val unavailable = channel.files.filter { f ->
+                f.sha256 !in pack && SetDownloader.cached(ctx, Staged(f.name, f.sha256, f.bytes, f.source)) == null &&
+                    ids[f.sha256].isNullOrEmpty()
+            }
+            // Stale or remote-only channel pins (e.g. an old guards.txt) must not block a packed app.
+            if (unavailable.isNotEmpty()) channel = null
+        }
         val files = channel?.files?.associate { it.name to it.sha256 } ?: base
         val problems = set.check(ShaList.render(files))
         if (problems.isNotEmpty()) throw Broken(problems.first())
         if (scripts.keys != RootScript.SCRIPTS.toSet() + INSTALLD_A16) throw Broken("the app's script list is not ${RootScript.SCRIPTS}")
-        val size = sizes(ctx)
         // The installd table of the set's host One UI, staged as host_installd.txt (0.4.66: Android 16 images'
         // sets carry One UI 8.5's codes).
         val installd = scripts.getValue(InstalldExpected.assetName(sdkOf(set)))
