@@ -328,6 +328,17 @@ abstract class OneOsFilesTask : DefaultTask() {
         val unknown = switcher.listFiles()!!.filter { it.isFile }.map { it.name }.toSet() - scripts.get().keys - notShipped.get()
         if (unknown.isNotEmpty()) throw GradleException("switcher/assets has $unknown: add it to sessionScripts or switcherNotShipped in app/build.gradle.kts")
         File(setsDir, "scripts.sha256").writeText(render(scriptSums))
+        val repoRoot = packages.get().asFile.parentFile.parentFile
+        File(packages.get().asFile, "channel-embed.txt").takeIf { it.isFile }?.readLines()
+            ?.filter { it.isNotBlank() && !it.startsWith("#") }?.forEach { line ->
+                val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
+                    ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
+                val sum = m.groupValues[1]
+                val src = File(repoRoot, m.groupValues[2])
+                if (!src.isFile) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is missing")
+                if (sha(src) != sum) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is not $sum")
+                put(src, sum)
+            }
         File(files, "index.txt").writeText(sizes.entries.joinToString("") { "${it.key} ${it.value}\n" })
         File(files, "remote.txt").writeText(remote.entries.joinToString("") { "${it.key} ${it.value}\n" })
         val registryFile = File(packages.get().asFile, "patch-sources.json")
