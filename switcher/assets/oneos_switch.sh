@@ -3019,8 +3019,10 @@ while true; do
                 echo \"[UI Activator] status bar: One UI's cutout '\${HCS:-none}', as \$CUTU: '\${CUT:-none}', rect '\${CUTR:-none}'; height \${HSB:-?} px\${SBK:+ (\$HSBG px at the \${SBK% *} px the guest runs)}, corner radius \${HRC:-?} px; overlays on:\${ON:- none}\${DIMS:+ (not made:\$DIMS)}\"
                 case \"\$ON\" in *OneOSStatusBarHeight*|*OneOSCornerRadius*) ;;
                     *)
-                        if [ $GUEST_AOSP_SYSUI = 1 ] && [ -f $STAGE/apply-host-cutout-overlays.sh ] && [ -f $STAGE/data/oneos_overlay_dimen.dex ]; then
-                            /system/bin/sh $STAGE/apply-host-cutout-overlays.sh 2>&1 | sed 's/^/[UI Activator] status bar: /'
+                        APPLY=$STAGE/apply-host-cutout-overlays.sh
+                        [ -f \"\$APPLY\" ] || APPLY=$STAGE/data/apply-host-cutout-overlays.sh
+                        if [ $GUEST_AOSP_SYSUI = 1 ] && [ -f \"\$APPLY\" ] && [ -f $STAGE/data/oneos_overlay_dimen.dex ]; then
+                            /system/bin/sh \"\$APPLY\" 2>&1 | sed 's/^/[UI Activator] status bar: /'
                         fi ;;
                 esac
             else
