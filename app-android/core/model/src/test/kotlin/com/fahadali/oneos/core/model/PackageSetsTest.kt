@@ -118,10 +118,14 @@ class PackageSetsTest {
         // The Pixel Fold sets (pull request #1, the F8U's since 0.4.21): the Pixel files, the patched
         // SystemUI, the angle relay and each one's unfold RRO. The bar sets (0.4.59 r12) have only
         // double tap to sleep, from each image's own SystemUI and Pixel Launcher.
-        for (bar in listOf(PackageSets.PIXEL_SULTRA, PackageSets.PIXEL9_SULTRA)) {
+        for (bar in listOf(PackageSets.PIXEL_SULTRA)) {
             assertEquals(listOf("samcam.tar", "OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk"),
                 bar.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
         }
+        assertEquals(
+            listOf("samcam.tar", "OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk", "OneOSSettingsGoogle.apk"),
+            PackageSets.PIXEL9_SULTRA.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name },
+        )
         val hinge = listOf("Fold8PixelSystemUI.apk", "Fold8AngleRelay.dex")
         // 0.4.59 (r11): and the boot animation on every panel; r12 the launcher with double tap to sleep.
         val bootanim = listOf("libbootanimation_preapex_patched.so", "OneOSPixelLauncher.apk")
@@ -135,7 +139,13 @@ class PackageSetsTest {
         assertEquals(PackageSets.PIXEL_SULTRA.files.filter { it.role != FileRole.GUEST_FIX } + tent, PackageSets.PIXEL_F8.files.filter { it.role != FileRole.GUEST_FIX })
         // The Pixel 9 Pro XL's set (0.4.22): the same files, from its own image; 0.4.47 its
         // libcameracompatbilityinfo.so needs One UI's codes too.
-        assertEquals(PackageSets.PIXEL_SULTRA.files + PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY), PackageSets.PIXEL9_SULTRA.files)
+        assertEquals(
+            PackageSets.PIXEL_SULTRA.files + listOf(
+                PackageFile("OneOSSettingsGoogle.apk", FileRole.GUEST_FIX),
+                PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY),
+            ),
+            PackageSets.PIXEL9_SULTRA.files,
+        )
         assertEquals(Images.ID_PIXEL_KOMODO, PackageSets.PIXEL9_SULTRA.imageId)
         // One SystemUI build and one relay for both: the APK packs each once.
         val f8uSums = ShaList.parse(shas(pixel)).entries

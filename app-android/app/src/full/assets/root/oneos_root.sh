@@ -540,7 +540,7 @@ set_files() {
         pixel-sultra) echo "$SET_PIXEL OneOSPixelSystemUI.apk OneOSPixelLauncher.apk" ;;
         hyper-f8u) echo "$SET_HYPEROS" ;;
         nothing-f8u) echo "$SET_NOTHING" ;;
-        pixel9-sultra) echo "$SET_PIXEL OneOSPixelSystemUI.apk OneOSPixelLauncher.apk libcameracompatbilityinfo_patched.so" ;;
+        pixel9-sultra) echo "$SET_PIXEL OneOSPixelSystemUI.apk OneOSPixelLauncher.apk OneOSSettingsGoogle.apk libcameracompatbilityinfo_patched.so" ;;
         infinityx) echo "$SET_INFINITYX" ;;
         oxygen16) echo "$SET_OXYGENOS" ;;
         originos) echo "$SET_ORIGINOS" ;;

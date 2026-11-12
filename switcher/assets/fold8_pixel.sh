@@ -40,6 +40,8 @@ bar_prepare() {
     elif grep -q '^  "image": "pixel9proxl-komodo",$' "$STAGE/.oneos_stage" && grep -q '^  "set": "pixel9-sultra",$' "$STAGE/.oneos_stage"; then
         bar_bind OneOSPixelSystemUI.apk "$SUI" e2072d91e7fe553256de6b6bfdbce00691e67a0b99fb90db3afb3dff9285c91b SystemUI
         bar_bind OneOSPixelLauncher.apk "$LCH" 28866dd3953784fe154ffcc5c44d76461b12a304e20b9806a1a91338310b4bb0 'Pixel Launcher'
+        SET="$STAGE/rootfs/system/system_ext/priv-app/SettingsGoogle/SettingsGoogle.apk"
+        bar_bind OneOSSettingsGoogle.apk "$SET" 221a5c96973abda79ec0a6cbc2322990879e4a6f27e516f56118f0691dbf87c6 Settings
     fi
 }
 case "$1" in

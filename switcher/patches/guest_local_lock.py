@@ -525,7 +525,7 @@ def patch_lss(lines, rel, pkg_text):
                       + r"->getCredentialTypeInternal\(I\)I")
     if len(t_code) not in (3, 4) or not call.fullmatch(t_code[-3][1]):
         raise Skip(f"{rel}: getCredentialType has another shape")
-    m = re.fullmatch(r"move-result (v\d+)", t_code[-2][1])
+    m = re.fullmatch(r"move-result (p0|v\d+)", t_code[-2][1])
     if not m or t_code[-1][1] != "return " + m.group(1) or t_locals > 8:
         raise Skip(f"{rel}: getCredentialType has another shape")
     if any(".catch" in l or l.strip().startswith(":") for l in lines[t_i:t_end]):

@@ -21,7 +21,23 @@ esac
 run_apktool d -q -f -r -o "$W/src" "$JAR"
 DIRS=$(python3 -I "$PATCHER" "$W/src")
 [ -n "$DIRS" ] || { echo "$PATCHER changed nothing" >&2; exit 1; }
-run_apktool b -q -o "$W/rebuilt.jar" "$W/src"
+if ! run_apktool b -q -o "$W/rebuilt.jar" "$W/src" 2> "$W/apktool.err"; then
+    FULL=$(sed -n 's/.*Could not smali folder: \(smali[_a-z0-9]*\).*/\1/p' "$W/apktool.err" | head -1)
+    if [ -z "$FULL" ] || ! grep -q 'Unsigned short value out of range' "$W/apktool.err" ||
+       [ -z "$(cd "$W/src/$FULL" && find . -name 'OneOS*.smali')" ]; then
+        cat "$W/apktool.err" >&2
+        exit 1
+    fi
+    LAST=$(ls -d "$W"/src/smali_classes* 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
+    OWN="smali_classes$((${LAST:-1} + 1))"
+    (cd "$W/src/$FULL" && find . -name 'OneOS*.smali') | while read -r f; do
+        mkdir -p "$W/src/$OWN/$(dirname "$f")"
+        mv "$W/src/$FULL/$f" "$W/src/$OWN/$f"
+        echo "dex overflow: $FULL $f -> $OWN" >&2
+    done
+    run_apktool b -q -o "$W/rebuilt.jar" "$W/src"
+    DIRS="$DIRS $OWN"
+fi
 cp "$JAR" "$W/out.jar"
 for d in $DIRS; do
     DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"

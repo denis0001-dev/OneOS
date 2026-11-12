@@ -1,5 +1,6 @@
-# Fork test channel: guest_local_lock + guest_no_frp_policy services jars and guards.
-650bcf21751a9bbdc03281cac6810362a11507d260d19b9cf2ac76d54407fed3 out/pixel_frp_lock.jar
+# Fork test channel: guest lock + FRP jars, Settings VPN fix, guards.
+2b7d2b22152d5a0f1e29d963df801f9747019252c091a43c6c617ade6bec04c8 out/pixel_guest_frp_lock.jar
 5c767b8c49061a5c54aa009780599a8607b2d9191a410efe115a72b6e0d21851 out/x9u_frp_lock.jar
-6a106cc9cd93fbca20731a0fe16d471935400d96c023069ae207d127d4503d02 app-android/packages/pixel9-sultra.guards.txt
+fd3e1d9be7d0afd1336eb58981ff05266abf440ba187c72eefddd0601d9c0ead out/OneOSSettingsGoogle.apk
+7850cd47f03ed6e582f9266893c538e4b849b303c5943b9dfe074d7b0b9c95b3 app-android/packages/pixel9-sultra.guards.txt
 f706c0fedfc54e1c3900e50d2922212e7a15125ba2047577b2fa61118a9a5aa7 app-android/packages/x9u-in-sultra.guards.txt

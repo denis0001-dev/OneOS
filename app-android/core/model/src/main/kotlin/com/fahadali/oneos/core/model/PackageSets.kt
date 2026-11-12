@@ -416,7 +416,12 @@ object PackageSets {
         imageId = Images.ID_PIXEL_KOMODO,
         sourceDir = "out/overlays_pixel_komodo_r16",
         // 0.4.47: this image's libcameracompatbilityinfo.so needs One UI's codes too (the Pixel 11 images' agree).
-        files = PIXEL_FILES + PIXEL_DT2S + PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY),
+        files = PIXEL_FILES + PIXEL_DT2S + listOf(
+            // komodo Settings: null legacy VPN profiles crash Network & internet
+            // (patches/guest_settings_vpn_null.py; fold8_pixel.sh binds it).
+            PackageFile("OneOSSettingsGoogle.apk", FileRole.GUEST_FIX),
+            PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY),
+        ),
         omitted = listOf(TETHERING),
         approxBytes = 703_551_633L,
         hasReturnApp = true,
