@@ -545,6 +545,11 @@ if [ -f /data/local/tmp/oneos/data/oneos_root/enabled ]; then
         MODE=reboot
     fi
 fi
+# After the allowlist audit, grant KernelSU manager and Termux on One UI again
+# (new installs, or a profile cleared while the guest was running).
+if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
+    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
+fi
 # OneOS: return by rebooting unless asked otherwise. Restarting One UI in place
 # after a session left one of its decompressed APEXes unreadable every time
 # (NFC, uwb, wifi): SIGBUS crash loops, RescueParty, and once an ext4

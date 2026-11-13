@@ -745,15 +745,16 @@ STG=$(timeout 10 pm list staged-sessions 2>/dev/null | grep -c 'sessionId')
 # package that id (patches/guest_ksu_manager_appid.py reads these two props) and
 # the UI activator installs One UI's own copy of the app. Only a KernelSU manager
 # (its kernel checks the uid) with an id below 15000 (no guest app has one).
-# Off by default since 0.4.39 (owner): root grants for guest apps and Zygisk are
-# not done yet; ONEOS_GUEST_KSU_MANAGER=1 turns it on. Off, nothing is staged and
-# the UI activator removes a manager an earlier session installed in the guest.
+# ONEOS_GUEST_KSU_MANAGER=1 (session.env default): One UI's manager is staged and
+# the UI activator installs it with One UI's app id. With 0, nothing is staged and
+# the UI activator removes a manager from the guest (including a manual install).
 echo "preflight: staged sessions done $(date +%T)"
 setprop oneos.ksu.mgr_pkg "" 2>/dev/null
 setprop oneos.ksu.mgr_appid "" 2>/dev/null
 KSU_DIR="$STAGE/data/oneos_ksu"
 rm -f "$KSU_DIR/manager" "$KSU_DIR/manager.apk" 2>/dev/null
-if [ -x /data/adb/ksud ] && [ "${ONEOS_GUEST_KSU_MANAGER:-0}" = 1 ]; then
+case "${ONEOS_GUEST_KSU_MANAGER:-1}" in 0|1) ;; *) refuse "ONEOS_GUEST_KSU_MANAGER=$ONEOS_GUEST_KSU_MANAGER (0 or 1)" ;; esac
+if [ -x /data/adb/ksud ] && [ "${ONEOS_GUEST_KSU_MANAGER:-1}" = 1 ]; then
     KSU_PKG="" KSU_ID=""
     for p in me.weishu.kernelsu com.rifsxd.ksunext com.sukisu.ultra app.kitsusu.manager; do
         u=$(awk -v p="$p" '$1 == p { print $2 }' /data/system/packages.list 2>/dev/null)
@@ -783,6 +784,11 @@ fi
 echo "preflight: return baseline start $(date +%T)"
 /system/bin/sh "$STAGE/return_to_oneui.sh" baseline
 echo "preflight: return baseline done $(date +%T)"
+# KernelSU manager and Termux need full root on One UI before guest_runtime
+# freezes the live allowlist for the session.
+echo "preflight: host KernelSU grants start $(date +%T)"
+/system/bin/sh "$STAGE/host_ksu_grants.sh" || echo "preflight: host KernelSU grants skipped or failed"
+echo "preflight: host KernelSU grants done $(date +%T)"
 echo "preflight: guest baseline start $(date +%T)"
 STAGE="$STAGE" /system/bin/sh "$STAGE/guest_runtime.sh" baseline || {
     echo 'Guest root baseline failed before stopping One UI; switch cancelled'
@@ -1018,13 +1024,23 @@ while true; do
         "")
             ;;
         *)
+            # Samsung One UI often reports mtp/sec_charging in sys.usb.state while
+            # adb stays up on FunctionFS. Tearing the gadget down for that looked
+            # like "USB settings vanished" and dropped the Mac data link on return.
+            case "$cfg" in *adb*) continue ;; esac
             now=$(date +%s 2>/dev/null || echo 0)
             if [ $((now - last_toggle)) -gt 300 ]; then
                 last_toggle=$now
                 echo "$(date) gadget lost adb, toggling (state: $usb, config: $cfg)" >> "$LOG"
+                want=$(getprop persist.sys.usb.config)
+                case "$want" in
+                    ""|none) want="rndis,adb" ;;
+                    *adb*) ;;
+                    *) want="$want,adb" ;;
+                esac
                 setprop sys.usb.config none 2>/dev/null
                 sleep 1
-                setprop sys.usb.config rndis,adb 2>/dev/null
+                setprop sys.usb.config "$want" 2>/dev/null
                 sleep 2
                 setprop ctl.start adbd 2>/dev/null
             fi
@@ -2174,7 +2190,7 @@ while true; do
             # An older install with another id (before the patch) is replaced; an
             # install -r every session keeps it One UI's version (and its id).
             if [ ! -f $STAGE/data/oneos_ksu/manager ]; then
-                # None staged (off by default since 0.4.39): a manager an earlier
+                # None staged (ONEOS_GUEST_KSU_MANAGER=0): a manager an earlier
                 # session installed here keeps One UI's app id (below 15000) and the
                 # kernel's trust; removed, with its data. One the user installed in
                 # the guest too (0.4.41, A36 0ee8cdb1 on 0.4.40): its late load

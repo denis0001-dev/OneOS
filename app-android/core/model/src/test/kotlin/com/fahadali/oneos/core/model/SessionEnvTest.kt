@@ -30,6 +30,7 @@ class SessionEnvTest {
             ONEOS_GUEST_SEC_IMS=0
             ONEOS_GUEST_EDM_STUB=0
             ONEOS_VERBOSE_BOOT=0
+            ONEOS_GUEST_KSU_MANAGER=1
             ONEOS_RETURN_MODE=inplace
 
             """.trimIndent(),
@@ -59,6 +60,7 @@ class SessionEnvTest {
             ONEOS_GUEST_SEC_IMS=0
             ONEOS_GUEST_EDM_STUB=0
             ONEOS_VERBOSE_BOOT=0
+            ONEOS_GUEST_KSU_MANAGER=1
             ONEOS_RETURN_MODE=inplace
 
             """.trimIndent(),
@@ -142,7 +144,7 @@ class SessionEnvTest {
         assertTrue(problems(good.removeSuffix("\n")).contains("must end with a newline"))
         assertTrue(problems(good.replace("\n", "\r\n")).isNotEmpty())
         assertTrue(problems("# comment\n$good").contains("line 1 is not KEY=VALUE"))
-        assertTrue(problems("$good\n").contains("line 20 is not KEY=VALUE"))
+        assertTrue(problems("$good\n").contains("line 21 is not KEY=VALUE"))
         assertTrue(problems(good.replace("ONEOS_APP=1", "export ONEOS_APP=1")).isNotEmpty())
         assertTrue(problems(good.replace("ONEOS_GUEST_FOLD=off", "ONEOS_GUEST_FOLD=\$(reboot)")).isNotEmpty())
         // A fold value in an S Ultra file: the profile decides the form.
@@ -194,10 +196,10 @@ class SessionEnvTest {
         // 0.4.67: OxygenOS 16 too (Google in the image, no gmssystem payload in its set).
         assertEquals(listOf(Images.FIND_N6, Images.FIND_X9U_IN, Images.NOTHING_METROID, Images.OXYGEN16), Images.ALL.filter { it.gmsHideable })
         assertEquals(
-            listOf("ONEOS_GUEST_HIDE_GMS", "ONEOS_HEAT_CAP", "ONEOS_GUEST_SEC_IMS", "ONEOS_GUEST_EDM_STUB", "ONEOS_VERBOSE_BOOT", "ONEOS_RETURN_MODE"),
-            SessionEnv.ALLOWED.keys.toList().takeLast(6),
+            listOf("ONEOS_GUEST_HIDE_GMS", "ONEOS_HEAT_CAP", "ONEOS_GUEST_SEC_IMS", "ONEOS_GUEST_EDM_STUB", "ONEOS_VERBOSE_BOOT", "ONEOS_GUEST_KSU_MANAGER", "ONEOS_RETURN_MODE"),
+            SessionEnv.ALLOWED.keys.toList().takeLast(7),
         )
-        assertEquals("ONEOS_VERBOSE_BOOT", SessionEnv.ALLOWED.keys.toList().dropLast(1).last())
+        assertEquals("ONEOS_VERBOSE_BOOT", SessionEnv.ALLOWED.keys.toList().dropLast(2).last())
         for (p in Profiles.BUILT_IN.filter { it.enabled }) {
             val text = SessionEnv.generate(p)
             assertTrue(p.id, text.lines().contains("${SessionEnv.SEC_IMS}=0"))
@@ -221,6 +223,17 @@ class SessionEnvTest {
             assertEquals(emptyList<String>(), SessionEnv.validate(text.replace("ONEOS_VERBOSE_BOOT=0", "ONEOS_VERBOSE_BOOT=1")))
             for (bad in listOf("2", "true", "", "1;reboot"))
                 assertTrue(SessionEnv.validate(text.replace("ONEOS_VERBOSE_BOOT=0", "ONEOS_VERBOSE_BOOT=$bad")).isNotEmpty())
+        }
+    }
+
+    @Test
+    fun ksuManagerIsOnByDefaultAndStrictlyBoolean() {
+        for (profile in Profiles.BUILT_IN.filter { it.enabled }) {
+            val text = SessionEnv.generate(profile)
+            assertTrue(text.contains("${SessionEnv.KSU_MANAGER}=1\n"))
+            assertEquals(emptyList<String>(), SessionEnv.validate(text.replace("${SessionEnv.KSU_MANAGER}=1", "${SessionEnv.KSU_MANAGER}=0")))
+            for (bad in listOf("2", "true", "", "1;reboot"))
+                assertTrue(SessionEnv.validate(text.replace("${SessionEnv.KSU_MANAGER}=1", "${SessionEnv.KSU_MANAGER}=$bad")).isNotEmpty())
         }
     }
 

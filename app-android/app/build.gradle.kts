@@ -160,6 +160,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "apply-host-cutout-overlays.sh" to File(repoRoot, "switcher/assets/apply-host-cutout-overlays.sh"),
     "repair-guest-session.sh" to File(repoRoot, "switcher/assets/repair-guest-session.sh"),
     "reload-guest-keyguard.sh" to File(repoRoot, "switcher/assets/reload-guest-keyguard.sh"),
+    "host_ksu_grants.sh" to File(repoRoot, "switcher/assets/host_ksu_grants.sh"),
 )
 val switcherNotShipped = setOf("oneos_tunnel.sh", "7zz")
 

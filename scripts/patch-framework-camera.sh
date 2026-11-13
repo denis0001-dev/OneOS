@@ -46,6 +46,12 @@ VD=$(python3 -I "$ROOT/switcher/patches/vivo_guards.py" framework "$WORK/fw")
 for d in $VD; do
     case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
 done
+# Samsung QTI HAL product strategies use vendor audio usages (e.g. 1005); without
+# this gate system_server dies in AudioService on bar Samsung hosts (pixel9-sultra).
+AU=$(python3 -I "$ROOT/switcher/patches/guest_audio_vendor_usage.py" "$WORK/fw")
+for d in $AU; do
+    case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
+done
 if [ -z "$DIRS" ]; then
     rm -f "$OUT/framework_patched.jar"
     sed -i '/ framework_patched\.jar$/d' "$OUT/guards.txt" 2>/dev/null || true

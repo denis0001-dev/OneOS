@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
+#include <stdbool.h>
 
 #define BASE "/data/adb/oneos"
 #define SOCK BASE "/run/su.sock"
@@ -46,7 +47,7 @@ static int safe_package(const char *s) {
 static int package_uid(const char *package, unsigned *uid) {
     FILE *f=fopen(PACKAGES,"re"); if(!f)return 0;
     char line[8192],p[256];unsigned u;int found=0;
-    while(fgets(line,sizeof(line),f))if(sscanf(line,"%255s %u",p,&u)==2&&!strcmp(p,package)){*uid=u;found=1;break;}
+    while(fgets(line,sizeof(line),f))if(sscanf(line,"%255s %u",p,&u)==2&&!strcmp(p,package)){if(uid)*uid=u;found=1;break;}
     fclose(f);return found;
 }
 static int granted(const char *package,unsigned uid) {
@@ -67,12 +68,74 @@ static int same_root(pid_t pid) {
     snprintf(p,sizeof(p),"/proc/%d/root",pid);
     return !stat(p,&peer)&&!stat("/",&own)&&peer.st_dev==own.st_dev&&peer.st_ino==own.st_ino;
 }
+/* KernelSU uapi (GPL-2.0): host-side ioctl only; guest grants stay in GRANTS. */
+#define KSU_APP_PROFILE_VER 4U
+#define KSU_MAX_PACKAGE_NAME 256
+#define KSU_MAX_GROUPS 32
+#define KSU_SELINUX_DOMAIN 64
+#define KSU_IOCTL_UID_GRANTED_ROOT _IOC(_IOC_READ|_IOC_WRITE,'K',8,0)
+#define KSU_IOCTL_GET_APP_PROFILE _IOC(_IOC_READ|_IOC_WRITE,'K',11,0)
+#define KSU_IOCTL_SET_APP_PROFILE _IOC(_IOC_WRITE,'K',12,0)
+struct ksu_root_profile {
+    int32_t uid,gid;uint32_t groups_count;int32_t groups[KSU_MAX_GROUPS];
+    struct{uint64_t effective,permitted,inheritable;}capabilities;
+    char selinux_domain[KSU_SELINUX_DOMAIN];int32_t namespaces;uint64_t flags;
+};
+struct ksu_non_root_profile{uint8_t umount_modules;};
+struct ksu_app_profile{
+    uint32_t version;char key[KSU_MAX_PACKAGE_NAME];int32_t curr_uid;uint8_t allow_su;
+    union{struct{uint8_t use_default;char template_name[KSU_MAX_PACKAGE_NAME];struct ksu_root_profile profile;}rp_config;
+          struct{uint8_t use_default;struct ksu_non_root_profile profile;}nrp_config;};
+};
+struct ksu_get_app_profile_cmd{struct ksu_app_profile profile;};
+struct ksu_set_app_profile_cmd{struct ksu_app_profile profile;};
+struct ksu_uid_granted_root_cmd{uint32_t uid;uint8_t granted;};
+static const char *KSU_MANAGERS[]={"me.weishu.kernelsu","com.rifsxd.ksunext","com.sukisu.ultra","app.kitsusu.manager",NULL};
+static int ksu_open_fd(void) {
+    if(getuid()!=0)return -1;
+    int fd=-1;syscall(SYS_reboot,0xDEADBEEFUL,0xCAFEBABEUL,0,&fd);return fd;
+}
+static int ksu_uid_granted(int fd,unsigned uid,uint8_t *granted) {
+    struct ksu_uid_granted_root_cmd cmd={uid,0};
+    if(ioctl(fd,KSU_IOCTL_UID_GRANTED_ROOT,&cmd))return -1;*granted=cmd.granted;return 0;
+}
+static int host_grant_package(const char *package) {
+    unsigned uid;uint8_t granted=0;
+    if(!safe_package(package)||!package_uid(package,&uid))return 1;
+    int fd=ksu_open_fd();
+    if(fd<0){fprintf(stderr,"OneOS: KernelSU grant unsupported\n");return 1;}
+    if(!ksu_uid_granted(fd,uid,&granted)&&granted){close(fd);printf("%s %u already granted\n",package,uid);return 0;}
+    struct ksu_get_app_profile_cmd get={0};
+    strncpy(get.profile.key,package,sizeof(get.profile.key)-1);
+    get.profile.curr_uid=(int32_t)uid;
+    ioctl(fd,KSU_IOCTL_GET_APP_PROFILE,&get);
+    struct ksu_app_profile *p=&get.profile;
+    memset(p,0,sizeof(*p));
+    p->version=KSU_APP_PROFILE_VER;
+    strncpy(p->key,package,sizeof(p->key)-1);
+    p->curr_uid=(int32_t)uid;
+    p->allow_su=1;
+    p->rp_config.use_default=1;
+    struct ksu_set_app_profile_cmd set={.profile=*p};
+    int rc=ioctl(fd,KSU_IOCTL_SET_APP_PROFILE,&set);
+    close(fd);
+    if(rc){fprintf(stderr,"OneOS: KernelSU grant failed for %s\n",package);return 1;}
+    printf("%s %u granted (default full root)\n",package,uid);return 0;
+}
+static int host_grant_core(void) {
+    int fail=0;
+    if(ksu_open_fd()<0){fprintf(stderr,"OneOS: KernelSU grant unsupported\n");return 1;}
+    unsigned u;const char **m;
+    for(m=KSU_MANAGERS;*m;m++)if(package_uid(*m,&u)&&host_grant_package(*m))fail=1;
+    if(package_uid("com.termux",&u)&&host_grant_package("com.termux"))fail=1;
+    return fail?1:0;
+}
 /* Read-only KernelSU live state. The two magic words request a driver fd;
  * they are not Linux's reboot magic. No root profiles/features are changed.
  * ABI follows KernelSU uapi/supercall.h (GPL-2.0), ioctl-first API. */
 static int host_audit(void) {
     if(getuid()!=0)return 1;
-    int fd=-1;syscall(SYS_reboot,0xDEADBEEFUL,0xCAFEBABEUL,0,&fd);
+    int fd=ksu_open_fd();
     if(fd<0){fprintf(stderr,"OneOS: live root-provider audit unsupported\n");return 1;}
     unsigned manager=0;
     if(ioctl(fd,0x80004B0AUL,&manager)){close(fd);return 1;}
@@ -288,6 +351,8 @@ int main(int argc,char **argv) {
     }
     if(argc==3&&!strcmp(argv[1],"--unpack"))return unpack(argv[2]);
     if(argc==2&&!strcmp(argv[1],"--host-audit"))return host_audit();
+    if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
+    if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
     if(argc>=3&&!strcmp(argv[1],"--guard-exec"))return getuid()?1:guard_exec(argv+2);
     if(argc==2&&!strcmp(argv[1],"--launch"))return getuid()?1:launch();
     if(argc==2&&!strcmp(argv[1],"--oneos-info"))return client(INFO,"");

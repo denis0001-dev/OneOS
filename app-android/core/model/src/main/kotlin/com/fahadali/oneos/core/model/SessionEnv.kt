@@ -59,6 +59,8 @@ object SessionEnv {
     /** 1: answer Knox's edmnativehelper while the guest runs, so a camera open is not 5 s late (oneos_switch.sh); experimental. */
     const val EDM_STUB = "ONEOS_GUEST_EDM_STUB"
     const val VERBOSE_BOOT = "ONEOS_VERBOSE_BOOT"
+    /** 1: stage One UI's KernelSU manager into the guest (oneos_switch.sh, guest_prepare.sh); 0: uninstall any manager in the guest. */
+    const val KSU_MANAGER = "ONEOS_GUEST_KSU_MANAGER"
 
     /** How the return brings One UI back: always in place, with the reboot as its failsafe (return_to_oneui.sh). */
     const val RETURN_MODE = "ONEOS_RETURN_MODE"
@@ -83,6 +85,7 @@ object SessionEnv {
         SEC_IMS to Regex("[01]"),
         EDM_STUB to Regex("[01]"),
         VERBOSE_BOOT to Regex("[01]"),
+        KSU_MANAGER to Regex("[01]"),
         RETURN_MODE to Regex("inplace"),
     )
 
@@ -149,6 +152,7 @@ object SessionEnv {
         out[SEC_IMS] = "0"
         out[EDM_STUB] = "0"
         out[VERBOSE_BOOT] = "0"
+        out[KSU_MANAGER] = "1"
         out[RETURN_MODE] = "inplace"
         return out
     }
@@ -203,7 +207,7 @@ object SessionEnv {
                     // Either value is the launch's own choice (the pattern allows only 0 or 1).
                     k == HEAT_CAP -> Unit
                     k == SEC_IMS -> {} // 0 or 1, a launch's choice on any phone and image
-                    k == EDM_STUB || k == VERBOSE_BOOT -> {} // 0 or 1, a launch's choice on any phone and image
+                    k == EDM_STUB || k == VERBOSE_BOOT || k == KSU_MANAGER -> {} // 0 or 1, a launch's choice on any phone and image
                     k != HIDE_GMS -> if (got != v) p += "$k=$got does not match profile $id ($v)"
                     got == "1" && image?.gmsHideable != true -> p += if (image?.googleServices == true) {
                         "$HIDE_GMS=1, but the ${image.shortName} image's sessions present Google services, which cannot be hidden"
