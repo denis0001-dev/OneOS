@@ -93,7 +93,7 @@ for need in services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2
                                         $2 == "libcamera_client_patched.so" || $2 == "libcameracompatbilityinfo_patched.so" ||
                                         $2 == "libsurfaceflinger_patched.so" || $2 == "telephony-common_patched.jar" ||
                                         $2 == "vivo-services_patched.jar" || $2 == "vivo-telephony-common-platform-ex_patched.jar" { print $2 }' "$STAGE/guards.txt"); do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$2 == n && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$STAGE/guards.txt")
     if [ -z "$sum" ] || [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" != "$sum" ]; then
         echo "ERROR: $STAGE/$need missing or not the guarded build in guards.txt; not starting the guest"
         exit 3
@@ -4782,9 +4782,9 @@ fi
 # data (data/oneos_ksu; guest_modules.sh applies them to this system's tree), and
 # ksud, which is a wrapper: a soft reboot becomes a request to oneos_switch.sh's
 # watcher (oneos.guest.powerctl; guest_softreboot.sh restarts this system only),
-# those commands are refused, the rest is the real ksud (bound read-only at
-# /data/oneos_ksu/ksud.real; the manager's own bundled copy is replaced with the
-# same wrapper by the UI activator). su is not affected: KernelSU's su runs
+# One UI init boot hooks are refused, module commands go to ksud.guest (the patched
+# host ksud copy under data/oneos_ksu; the manager's bundled libksud.so gets the
+# same wrapper from the UI activator). su is not affected: KernelSU's su runs
 # /system/bin/sh, and the guest's /system/xbin/su is its own copy (section 6).
 # Every mount here is under the guest's private tree and made private itself;
 # init's mount table is checked afterwards, and all of it undone if anything
@@ -4799,10 +4799,17 @@ if [ -f /data/adb/ksud ] && [ "${ONEOS_GUEST_KSUD_WRAP:-1}" = 1 ]; then
 # act on the phone's own init (One UI's), so they never run from here.
 case "$1" in
     soft-reboot)
+        # Installers run during guest_softreboot while shared sys.boot_completed
+        # is still 1 from One UI; they must not chain another restart mid-pass.
+        if [ -f /data/adb/oneos/.softreboot_install ] ||
+           [ -f /data/local/tmp/oneos/tmp/softreboot.installing ]; then
+            echo "OneOS: soft reboot skipped during module install (this restart applies changes)"
+            exit 0
+        fi
         setprop oneos.guest.powerctl "ksud:soft-reboot"
         echo "OneOS: soft reboot of this system requested"
         exit 0 ;;
-    post-fs-data|services|boot-completed|late-load|unload|uninstall|install|insmod|boot-patch|boot-patch-v2|boot-restore)
+    post-fs-data|services|boot-completed|late-load|insmod|boot-patch|boot-patch-v2|boot-restore)
         echo "OneOS: 'ksud $1' acts on One UI's boot; not run inside this system" >&2
         exit 1 ;;
     debug)
@@ -4817,10 +4824,16 @@ case "$1" in
             set -- debug su "$@"
         fi ;;
 esac
-exec /data/oneos_ksu/ksud.real "$@"
+# ksud.real in staged data is an empty placeholder; the patched binary is ksud.guest
+# (also in the guest tree when the stage data bridge is up).
+for _k in /data/oneos_ksu/ksud.guest /data/local/tmp/oneos/data/oneos_ksu/ksud.guest; do
+    if [ -x "$_k" ] && [ -s "$_k" ]; then exec "$_k" "$@"; fi
+done
+echo "OneOS: ksud.guest missing in this system" >&2
+exit 127
 KSUDWRAP
     chmod 755 "$KW/ksud"
-    : > "$KW/ksud.real" 2>/dev/null
+    rm -f "$KW/ksud.real"
     # ksud's module commands (list, install, uninstall, enable, disable, action)
     # first enter the mount namespace of pid 1, as format!("/proc/{}/ns/mnt", 1):
     # from a guest that is One UI's init, whatever namespace they were run in. In
@@ -4834,28 +4847,40 @@ KSUDWRAP
     KG="$KW/ksud.guest"
     rm -f "$KG" "$KG.tmp"
     KT=''
-    if cp /data/adb/ksud "$KG.tmp"; then
-        KO=$(toybox grep -obaF /ns/mnt "$KG.tmp" 2>/dev/null | cut -d: -f1)
-        if [ "$(echo "$KO" | grep -c .)" = 1 ] &&
-           [ "$($BB dd if="$KG.tmp" bs=1 skip=$((KO - 9)) count=9 2>/dev/null | $BB od -An -tx1 | tr -d ' \n')" = 062f70726f632fc007 ]; then
-            printf /data/ | $BB dd of="$KG.tmp" bs=1 seek=$((KO - 8)) conv=notrunc 2>/dev/null
-            [ "$($BB dd if="$KG.tmp" bs=1 skip=$((KO - 9)) count=9 2>/dev/null | $BB od -An -tx1 | tr -d ' \n')" = 062f646174612fc007 ] &&
-                chmod 755 "$KG.tmp" && mv "$KG.tmp" "$KG" && KT=1
+    KSUD_PATCH="$STAGE/guest_ksud_mount_namespace.py"
+    if [ -f /data/adb/ksud ] && [ -r /data/adb/ksud ]; then
+        if [ -f "$KSUD_PATCH" ] && command -v python3 >/dev/null 2>&1 &&
+            python3 -I "$KSUD_PATCH" /data/adb/ksud "$KG.tmp" 2>"$STAGE/tmp/ksud_patch.err"; then
+            chmod 755 "$KG.tmp" && mv -f "$KG.tmp" "$KG" && KT=1
+        elif cp /data/adb/ksud "$KG.tmp"; then
+            KO=$(toybox grep -obaF /ns/mnt "$KG.tmp" 2>/dev/null | cut -d: -f1)
+            if [ "$(echo "$KO" | grep -c .)" = 1 ] &&
+               [ "$($BB dd if="$KG.tmp" bs=1 skip=$((KO - 9)) count=9 2>/dev/null | $BB od -An -tx1 | tr -d ' \n')" = 062f70726f632fc007 ]; then
+                printf /data/ | $BB dd of="$KG.tmp" bs=1 seek=$((KO - 8)) conv=notrunc 2>/dev/null
+                [ "$($BB dd if="$KG.tmp" bs=1 skip=$((KO - 9)) count=9 2>/dev/null | $BB od -An -tx1 | tr -d ' \n')" = 062f646174612fc007 ] &&
+                    chmod 755 "$KG.tmp" && mv -f "$KG.tmp" "$KG" && KT=1
+            fi
         fi
+        rm -f "$KG.tmp"
+        [ "$KT" = 1 ] || echo "KernelSU in the guest: ksud mount-namespace patch failed (see $STAGE/tmp/ksud_patch.err)"
+    else
+        echo "KernelSU in the guest: /data/adb/ksud not readable; not patched"
     fi
-    rm -f "$KG.tmp"
     mkdir -p "$STAGE/data/1/ns" && ln -sfn /proc/self/ns/mnt "$STAGE/data/1/ns/mnt"
     [ "$(readlink "$STAGE/data/1/ns/mnt")" = /proc/self/ns/mnt ] || KT=''
     ADB_HOST_MNT=$(grep -c ' /data/adb' /proc/1/mounts)
     awk '$2 ~ "^/data/adb" { print $2 }' /proc/1/mounts > "$STAGE/tmp/adb_mounts.before"
     ok=1
     [ "$KT" = 1 ] || { ok=0; echo "KernelSU in the guest: this ksud's module namespace switch was not found as expected; not patched"; }
+    mkdir -p "$ROOTFS/data/oneos_ksu"
+    cp -f "$KW/ksud" "$ROOTFS/data/oneos_ksu/ksud" 2>/dev/null
     if [ $ok = 1 ] && $BB mount --make-private "$GA" && $BB mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs "$GA" &&
        $BB mount --make-private "$GA"; then
         for e in $(ls -A /data/adb 2>/dev/null); do
             case "$e" in modules|modules_update) continue ;; esac
             if [ "$e" = ksud ]; then
-                : > "$GA/ksud" && $BB mount --bind "$KW/ksud" "$GA/ksud" && $BB mount --make-private "$GA/ksud" || ok=0
+                # A plain file here: mount --make-private returns EINVAL on some kernels (S25).
+                cp -f "$KW/ksud" "$GA/ksud" && chmod 755 "$GA/ksud" || ok=0
             elif [ -L "/data/adb/$e" ]; then
                 $BB cp -P "/data/adb/$e" "$GA/$e" 2>/dev/null
             elif [ -d "/data/adb/$e" ]; then
@@ -4869,8 +4894,21 @@ KSUDWRAP
         for d in modules modules_update; do
             mkdir "$GA/$d" && $BB mount --bind "$KW/$d" "$GA/$d" && $BB mount --make-private "$GA/$d" || ok=0
         done
-        $BB mount --bind "$KG" "$ROOTFS/data/oneos_ksu/ksud.real" &&
-            $BB mount -o remount,bind,ro "$KG" "$ROOTFS/data/oneos_ksu/ksud.real" || ok=0
+        # Module installers and customize.sh call /data/adb/ksud; host trees may omit it.
+        if [ ! -x "$GA/ksud" ] || [ ! -s "$GA/ksud" ]; then
+            cp -f "$KW/ksud" "$GA/ksud" && chmod 755 "$GA/ksud" || ok=0
+        fi
+        _kg_inode=$($BB stat -c %i "$KG" 2>/dev/null)
+        for _kg_dst in "$ROOTFS/data/oneos_ksu/ksud.guest" "$KW/ksud.guest"; do
+            if [ -n "$_kg_inode" ] && [ "$_kg_inode" = "$($BB stat -c %i "$_kg_dst" 2>/dev/null)" ]; then
+                chmod 755 "$_kg_dst" 2>/dev/null || ok=0
+            elif ! cp -f "$KG" "$_kg_dst" 2>/dev/null || ! chmod 755 "$_kg_dst" 2>/dev/null; then
+                ok=0
+            fi
+        done
+        if [ -f "$STAGE/data/oneos_root/enabled" ] && [ -d "$STAGE/data/oneos_root/adb" ]; then
+            cp -f "$KW/ksud" "$STAGE/data/oneos_root/adb/ksud" && chmod 755 "$STAGE/data/oneos_root/adb/ksud" || ok=0
+        fi
     else
         ok=0
     fi
@@ -4882,7 +4920,7 @@ KSUDWRAP
         for m in $(awk '$2 ~ "^/data/adb" { print $2 }' /proc/1/mounts | sort -r); do
             grep -qx "$m" "$STAGE/tmp/adb_mounts.before" || { $BB umount -l "$m" && echo "!!! KernelSU in the guest: $m had reached One UI's namespace; unmounted"; }
         done
-        $BB umount -l "$ROOTFS/data/oneos_ksu/ksud.real" 2>/dev/null
+        rm -f "$ROOTFS/data/oneos_ksu/ksud.guest" "$ROOTFS/data/oneos_ksu/ksud" 2>/dev/null
         $BB umount -l "$GA" 2>/dev/null
         echo "KernelSU in the guest: view not set up; the guest's /data/adb stays One UI's, read-only (its KernelSU app is not installed this session)"
         rm -f "$KW/manager"
@@ -5232,6 +5270,7 @@ chmod 755 "$STAGE/data/local/tmp/app_storage_loop.sh" 2>/dev/null || true
 
 echo "=== 6. $(date +%T) Setting up /system/xbin/su (KernelSU Bridge) ==="
 if ! mount | grep -q "$ROOTFS/system/xbin "; then
+    mkdir -p "$ROOTFS/system/xbin" || exit 3
     if [ -f "$STAGE/data/oneos_root/enabled" ]; then
         $BB mount -t tmpfs tmpfs "$ROOTFS/system/xbin" || exit 3
     else
@@ -6470,18 +6509,25 @@ command -v oneos_boot_event >/dev/null 2>&1 && oneos_boot_event 'Preparing guest
 if [ -f "$S/data/oneos_root/enabled" ]; then
     "$BB" chroot "$S/rootfs" /system/bin/sh /data/oneos_runtime.sh restore-props || exit 1
 fi
+# Shared props: One UI may still have sys.boot_completed=1; clear before installers
+# run so ksud's wrapper does not treat this pass as a finished boot.
+setprop sys.boot_completed 0
+setprop dev.bootcomplete 0
+setprop service.bootanim.exit 0
 # This system's modules, applied again (installs, updates and removals since).
 [ -f $S/tmp/guest_modules.sh ] || exit 1
 BB=$BB /system/bin/sh $S/tmp/guest_modules.sh || exit 1
 if [ -f "$S/data/oneos_root/enabled" ]; then
     # New ZIPs need customize.sh before their generated files are mounted.
-    "$BB" chroot "$S/rootfs" /system/bin/sh /data/oneos_runtime.sh install || exit 1
+    touch $S/tmp/softreboot.installing
+    "$BB" chroot "$S/rootfs" /system/bin/sh /data/oneos_runtime.sh install || {
+        rm -f $S/tmp/softreboot.installing
+        exit 1
+    }
+    rm -f $S/tmp/softreboot.installing
     BB=$BB /system/bin/sh $S/tmp/guest_modules.sh || exit 1
 fi
 rm -f $S/data/oneos_rec_stop
-setprop sys.boot_completed 0
-setprop dev.bootcomplete 0
-setprop service.bootanim.exit 0
 command -v oneos_boot_event >/dev/null 2>&1 && oneos_boot_event 'Starting guest services'
 echo "$(date +%T) soft reboot: starting the guest again"
 echo "=== OneOS soft reboot $(date '+%F %T') ($1) ===" >> $S/data/takeover.log
@@ -6514,6 +6560,7 @@ stat -c %d $S/rootfs > $S/guest_rootdev 2>/dev/null
   done ) </dev/null >>$S/auto_return.log 2>&1 &
 g=$(cat $S/tmp/softreboot.gen 2>/dev/null); case "$g" in ''|*[!0-9]*) g=0 ;; esac
 echo $((g + 1)) > $S/tmp/softreboot.gen
+date +%s > $S/tmp/softreboot.last
 echo "$(date +%T) soft reboot: guest_start.sh running again (pid $TP, $NEW_NS), generation $((g + 1))"
 exit 0
 GUESTSOFTREBOOT

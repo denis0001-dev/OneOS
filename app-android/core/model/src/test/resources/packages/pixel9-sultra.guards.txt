@@ -1,6 +1,7 @@
 # framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)
 # guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)
 # framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py) and Samsung IMS's framework members (patches/guest_secims_members.py)
+# guest_audio_vendor_usage.py on framework (Samsung HAL usage 1005; AudioService on S25 Ultra)
 # telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py)
 # r3 (0.4.45): the r2 jars plus patches/guest_sec_ims_signature.py and guest_no_wipe_secrets.py (services), guest_secims_members.py (framework), guest_smsc_international.py (telephony-common), by scripts/patch-built-jar.sh
 # r4 (0.4.47): libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the image's native camera client with One UI's transaction codes (patches/pixel_camera_native.py, scripts/patch-camera-native.sh); samcam.tar: Samsung Camera (scripts/samsung-camera/build-cached.sh)
@@ -19,10 +20,11 @@
 # 0.4.96 r126: guest_local_lock on Pixel (move-result p0); komodo Settings via OneOSSettingsGoogle.apk (not a guard jar)
 # 0.4.96 r130: guest_local_lock PIN metrics + lockscreen.auto_pin_confirm (getBoolean upgrade)
 # 0.4.96 r134: services_patched.jar classes5.dex is the full OneOSGuestLock (pinLengthForUser)
-6e790721af4b3a26f23a21a9c39923af5bcf0e420703fab51d37b9eb299f3450  services_patched.jar
+# 0.4.96 r135: PreAuthInfo deviceCredentialAvailable for guest-lock BiometricPrompt (GMS add account)
+d7e2f36da04293e9e434d26fab8a54051d125a3a39e00c7932fac12cf566ecad  services_patched.jar
 607ae15ccbe753fb25ef8e3d40f72a3ec8a2243dc3828adea78089731eca64aa  vold_patched
 8f76de6d0c7c74e6526efc7678ae81b1cf344121f39b3d27e618116ed5d41f51  service.incremental_patched.so
-b65069737c3cfd45863f9f2e83a9a25399623c4527a520309297173f8b95203d  framework_patched.jar
 34bec0671259777da74a17bad23a4499c623887082e2c08118451020feffa877  telephony-common_patched.jar
 8d4838e51620832ea9d1260f446f6c018d5e3d1e1caaa58033e6f985ad94cc15  libcamera_client_patched.so
 576beea05ff164071db53dc2139efa98c9781ff844c8a9a61b8005066ff1b95a  libcameracompatbilityinfo_patched.so
+243027ad8ae6888f5338229289bdee581fcddf8c291d130031861318847cb65f  framework_patched.jar

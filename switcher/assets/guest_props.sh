@@ -213,9 +213,12 @@ add)
                 echo "$BLUR=$hv" >> "$OVR"
                 echo "guest_props: $BLUR=$hv overridden to 1 for the session (window blur)"
             fi
-        elif ! grep -q "^$BLUR=" "$NEW"; then
-            echo "$BLUR=1" >> "$NEW"
         fi
+        # The Pixel image sets this to 0 in build.prop; the batch below would
+        # re-apply 0 unless the guest list is forced to 1 (run 44, owner).
+        sed -i "/^$BLUR=/d" "$NEW"
+        echo "$BLUR=1" >> "$NEW"
+        echo "guest_props: $BLUR=1 for the session (window blur)"
     fi
     # ColorOS's animation level. OPPO's launcher turns its material blur on
     # only when persist.sys.oplus.anim_level is a valid level
@@ -1157,6 +1160,20 @@ add)
     fi
     echo "guest_props add: batch done $(date +%T)"
     echo "guest_props: added $(wc -l < "$ADDED") props from the guest's build.prop files"
+    if [ "${ONEOS_GUEST_BLUR:-1}" = 1 ]; then
+        BLUR=ro.surface_flinger.supports_background_blur
+        "$RP" -n "$BLUR" 1 2>/dev/null || true
+        case "$(getprop "$BLUR" 2>/dev/null)" in
+            1) echo "guest_props: $BLUR=1 live in property area (window blur)" ;;
+            *)
+                setprop "$BLUR" 1 2>/dev/null || true
+                case "$(getprop "$BLUR" 2>/dev/null)" in
+                    1) echo "guest_props: $BLUR=1 via setprop fallback (window blur)" ;;
+                    *) echo "guest_props: WARNING $BLUR=$(getprop "$BLUR") after resetprop/setprop, expected 1" ;;
+                esac
+                ;;
+        esac
+    fi
     rm -f "$HOST" "$NEW"
     # ColorOS's default sounds. One UI defines ro.config.ringtone,
     # notification_sound and alarm_alert, so the guest read Samsung's names (run

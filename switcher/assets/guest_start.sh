@@ -320,6 +320,21 @@ CD=/data/oneos_composer_before_sf.log
 # each session: a stutter the first time each blur, animation or window shape
 # is drawn. This is the guest's own /data (the stage).
 mkdir -p /data/misc/surfaceflinger && chown 1000:1000 /data/misc/surfaceflinger && chmod 0700 /data/misc/surfaceflinger
+if [ "${ONEOS_GUEST_BLUR:-1}" = 1 ]; then
+    _OB=ro.surface_flinger.supports_background_blur
+    case "$(getprop "$_OB" 2>/dev/null)" in
+        1) echo "[Pivoted Root] $_OB=1 before SurfaceFlinger" ;;
+        *)
+            _RP=""
+            for _c in /data/adb/ksu/bin/resetprop /data/adb/ap/bin/resetprop; do
+                [ -x "$_c" ] && _RP=$_c && break
+            done
+            [ -n "$_RP" ] && "$_RP" -n "$_OB" 1 2>/dev/null || true
+            setprop "$_OB" 1 2>/dev/null || true
+            echo "[Pivoted Root] $_OB=$(getprop "$_OB" 2>/dev/null) set before SurfaceFlinger (blur)"
+            ;;
+    esac
+fi
 echo "[Pivoted Root] Starting guest SurfaceFlinger..."
 # sf.log used to grow without bound: the guest's RenderEngine dumps LLVM IR for
 # every shader it compiles ("Global Value @fullLiteral...") and got to 300+ MB in

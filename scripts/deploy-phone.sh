@@ -52,7 +52,7 @@ fi
 # (make-overlays.sh lists them in guards.txt when it built them).
 [ -f "$OVERLAYS/guards.txt" ] || { echo "$OVERLAYS: no guards.txt" >&2; exit 1; }
 for need in services_patched.jar $(awk '$2 == "oplus-services_patched.jar" || $2 == "vold_patched" || $2 == "service.incremental_patched.so" { print $2 }' "$OVERLAYS/guards.txt"); do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$OVERLAYS/guards.txt" 2>/dev/null || true)
+    sum=$(awk -v n="$need" '$2 == n && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$OVERLAYS/guards.txt" 2>/dev/null || true)
     if [ -z "$sum" ] || [ ! -f "$OVERLAYS/$need" ] || [ "$(sha256sum "$OVERLAYS/$need" | cut -d' ' -f1)" != "$sum" ]; then
         echo "$OVERLAYS: $need missing or not the one in its guards.txt" >&2
         exit 1

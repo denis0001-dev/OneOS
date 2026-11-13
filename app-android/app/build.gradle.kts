@@ -156,10 +156,14 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "host_installd.txt" to File(repoRoot, "switcher/patches/host_installd.txt"),
     // 0.4.66: One UI 8.5's table, staged as host_installd.txt for SDK 36 (Android 16) images.
     "host_installd_a16.txt" to File(repoRoot, "switcher/patches/host_installd_a16.txt"),
+    // Guest KernelSU: ksud /proc/ -> /data/ mount-namespace patch (guest_prepare.sh).
+    "guest_ksud_mount_namespace.py" to File(repoRoot, "switcher/patches/guest_ksud_mount_namespace.py"),
     // 0.4.96: optional repair on a running session (the switch UI activator does this at boot).
     "apply-host-cutout-overlays.sh" to File(repoRoot, "switcher/assets/apply-host-cutout-overlays.sh"),
     "repair-guest-session.sh" to File(repoRoot, "switcher/assets/repair-guest-session.sh"),
     "reload-guest-keyguard.sh" to File(repoRoot, "switcher/assets/reload-guest-keyguard.sh"),
+    "reload-guest-ksud.sh" to File(repoRoot, "switcher/assets/reload-guest-ksud.sh"),
+    "live-guest-blur-ksud.sh" to File(repoRoot, "switcher/assets/live-guest-blur-ksud.sh"),
     "host_ksu_grants.sh" to File(repoRoot, "switcher/assets/host_ksu_grants.sh"),
 )
 val switcherNotShipped = setOf("oneos_tunnel.sh", "7zz")
@@ -277,6 +281,14 @@ abstract class OneOsFilesTask : DefaultTask() {
                 require(bytes in 1..receiveMax) { "invalid published size: $line" }
                 parts[0] to bytes
             } ?: emptyMap()
+        val repoRoot = packages.get().asFile.parentFile.parentFile
+        val channelEmbedLines = File(packages.get().asFile, "channel-embed.txt").takeIf { it.isFile }?.readLines()
+            ?.filter { it.isNotBlank() && !it.startsWith("#") } ?: emptyList()
+        val channelEmbedHashes = channelEmbedLines.map { line ->
+            val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
+                ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
+            m.groupValues[1]
+        }.toSet()
         fun put(src: File, sum: String) {
             val dst = File(files, sum)
             if (!dst.exists()) src.copyTo(dst)
@@ -285,6 +297,7 @@ abstract class OneOsFilesTask : DefaultTask() {
         // A set file: in the APK (packSets), else its size and Drive id only.
         fun putSet(src: File, sum: String, problems: MutableList<String>) {
             if (pack) { put(src, sum); return }
+            if (sum in channelEmbedHashes) { put(src, sum); return }
             val id = ids[sum]
             if (id == null) { problems += "${src.name} ($sum) is not on Drive: run scripts/release-files.py"; return }
             sizes[sum] = src.length()
@@ -333,17 +346,15 @@ abstract class OneOsFilesTask : DefaultTask() {
         val unknown = switcher.listFiles()!!.filter { it.isFile }.map { it.name }.toSet() - scripts.get().keys - notShipped.get()
         if (unknown.isNotEmpty()) throw GradleException("switcher/assets has $unknown: add it to sessionScripts or switcherNotShipped in app/build.gradle.kts")
         File(setsDir, "scripts.sha256").writeText(render(scriptSums))
-        val repoRoot = packages.get().asFile.parentFile.parentFile
-        File(packages.get().asFile, "channel-embed.txt").takeIf { it.isFile }?.readLines()
-            ?.filter { it.isNotBlank() && !it.startsWith("#") }?.forEach { line ->
-                val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
-                    ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
-                val sum = m.groupValues[1]
-                val src = File(repoRoot, m.groupValues[2])
-                if (!src.isFile) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is missing")
-                if (sha(src) != sum) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is not $sum")
-                put(src, sum)
-            }
+        channelEmbedLines.forEach { line ->
+            val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
+                ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
+            val sum = m.groupValues[1]
+            val src = File(repoRoot, m.groupValues[2])
+            if (!src.isFile) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is missing")
+            if (sha(src) != sum) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is not $sum")
+            put(src, sum)
+        }
         File(files, "index.txt").writeText(sizes.entries.joinToString("") { "${it.key} ${it.value}\n" })
         File(files, "remote.txt").writeText(remote.entries.joinToString("") { "${it.key} ${it.value}\n" })
         val registryFile = File(packages.get().asFile, "patch-sources.json")

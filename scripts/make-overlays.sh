@@ -349,7 +349,8 @@ else
     # thermal term leaves updateBlurEnabled(); Developer options and battery
     # saver still turn it off (patches/guest_blur_no_thermal.py).
     KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_blur_no_thermal.py" "$WORK/services")"
-    echo "Window blur: not turned off by heat (BlurController.updateBlurEnabled)"
+    KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_blur_cross_window.py" "$WORK/services")"
+    echo "Window blur: not turned off by heat; cross-window blur forced on (BlurController.updateBlurEnabled)"
 fi
 # Qualcomm's display additions make a second built-in panel private, and the
 # Z Fold's cover becomes display 0 when it folds: no app could use it

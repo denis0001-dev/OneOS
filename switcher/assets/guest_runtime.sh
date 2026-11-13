@@ -135,20 +135,39 @@ baseline)
     [ -f "$STATE/enabled" ] || exit 0
     B=$S/tmp/guest_runtime_baseline
     mkdir -p "$B"
+    if ! mkdir "$B/.running" 2>/dev/null; then
+        echo 'Guest runtime: baseline already in progress' >&2
+        exit 1
+    fi
+    trap 'rmdir "$B/.running" 2>/dev/null' EXIT INT TERM
     rm -f "$B/ready"
+    busy=''
+    for x in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
+        [ ! -x "$x" ] || { busy=$x; break; }
+    done
+    [ -n "$busy" ] || exit 1
     # Keep the host's persisted list intact even if an older kernel prunes its
     # live table after seeing a guest package event. Keep this read-only bind
     # until reboot on an audit failure; remove it only after a matching audit.
     if [ -f /data/adb/ksu/.allowlist ] && [ ! -L /data/adb/ksu/.allowlist ]; then
-        cp /data/adb/ksu/.allowlist "$B/allowlist.saved"
-        busy=''
-        for x in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do [ ! -x "$x" ] || { busy=$x; break; }; done
-        [ -n "$busy" ] || exit 1
-        "$busy" mount --bind "$B/allowlist.saved" /data/adb/ksu/.allowlist
-        # BusyBox requires both operands for a file bind remount; the host
-        # namespace's /proc/mounts need not list the bind we just created.
-        if ! "$busy" mount -o remount,bind,ro "$B/allowlist.saved" /data/adb/ksu/.allowlist; then
-            "$busy" umount /data/adb/ksu/.allowlist
+        bound=0
+        if awk -v s="$B/allowlist.saved" 'index($5, s) { exit 0 } END { exit 1 }' /proc/self/mountinfo 2>/dev/null; then
+            bound=1
+        fi
+        if [ "$bound" = 0 ]; then
+            if ! cp /data/adb/ksu/.allowlist "$B/allowlist.saved"; then
+                echo 'Guest runtime: could not snapshot .allowlist for baseline' >&2
+                exit 1
+            fi
+            "$busy" mount --bind "$B/allowlist.saved" /data/adb/ksu/.allowlist
+            # BusyBox requires both operands for a file bind remount; the host
+            # namespace's /proc/mounts need not list the bind we just created.
+            if ! "$busy" mount -o remount,bind,ro "$B/allowlist.saved" /data/adb/ksu/.allowlist; then
+                "$busy" umount /data/adb/ksu/.allowlist
+                exit 1
+            fi
+        elif [ ! -f "$B/allowlist.saved" ]; then
+            echo 'Guest runtime: .allowlist is bound but allowlist.saved is missing' >&2
             exit 1
         fi
         : > "$B/allowlist.protected"
@@ -164,7 +183,10 @@ baseline)
             ;;
         esac
     done
-    "$S/guest_root" --host-audit > "$B/root.unsorted" || exit 0
+    if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/root.unsorted" 2>"$B/audit.err"; then
+        echo 'Guest runtime: live root-provider audit failed or timed out' >&2
+        exit 1
+    fi
     sort "$B/root.unsorted" > "$B/root"
     sha256sum /sys/fs/selinux/policy > "$B/selinux" || exit 0
     awk '{print $1, $2, $6}' /proc/modules | sort > "$B/kernel-modules"
@@ -177,7 +199,15 @@ verify-return)
     B=$S/tmp/guest_runtime_baseline
     [ -f "$B/ready" ] || { echo 'Guest runtime: no supported live root audit; reboot fallback required'; exit 1; }
     [ "$(cat "$B/boot")" = "$(cat /proc/sys/kernel/random/boot_id)" ] || exit 1
-    "$S/guest_root" --host-audit > "$B/return.unsorted" || exit 1
+    busy=''
+    for x in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
+        [ ! -x "$x" ] || { busy=$x; break; }
+    done
+    [ -n "$busy" ] || exit 1
+    if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/return.unsorted" 2>"$B/return.audit.err"; then
+        echo 'Guest runtime: return root audit failed or timed out' >&2
+        exit 1
+    fi
     sort "$B/return.unsorted" > "$B/return.root"
     cmp -s "$B/root" "$B/return.root" || { echo 'Guest runtime: host root grants or manager changed'; exit 1; }
     sha256sum -c "$B/selinux" || { echo 'Guest runtime: shared SELinux policy changed'; exit 1; }
@@ -315,10 +345,11 @@ uninstall)
     ;;
 install)
     A=/data/adb
+    touch "$A/oneos/.softreboot_install"
     /data/adb/oneos/bin/su --daemon >> "$A/oneos/run/session.log" 2>&1 &
     bootstrap=$!
     # SIGKILL, as in the uninstall stage above: a SIGTERM can be lost in the forked shell.
-    trap 'kill -KILL "$bootstrap" 2>/dev/null || true; wait "$bootstrap" 2>/dev/null || true' EXIT
+    trap 'kill -KILL "$bootstrap" 2>/dev/null || true; wait "$bootstrap" 2>/dev/null || true; rm -f "$A/oneos/.softreboot_install"' EXIT
     A=/data/adb
     export PATH=/system/bin:/system/xbin:/data/adb/ksu/bin
     export ASH_STANDALONE=1

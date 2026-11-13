@@ -34,6 +34,22 @@ root_only() {
 }
 [ "$(id -u 2>/dev/null)" = 0 ] || refuse "not running as root"
 
+# One switch at a time. A stuck preflight (guest_runtime baseline on KernelSU)
+# left a second launch beside it on the S25 Ultra: two baselines, no progress,
+# "Shutting down One UI" for over an hour. Stale lock when the pid is gone.
+ONEOS_SWITCH_LOCK="$STAGE/tmp/switch.lock"
+if ! mkdir "$ONEOS_SWITCH_LOCK" 2>/dev/null; then
+    for op in $(pgrep -f "$STAGE/oneos_switch.sh" 2>/dev/null); do
+        case "$op" in ''|$$) continue ;; esac
+        tr '\000' ' ' < "/proc/$op/cmdline" 2>/dev/null | grep -qF "$STAGE/oneos_switch.sh" || continue
+        kill -0 "$op" 2>/dev/null || continue
+        refuse "another switch is already running (pid $op)"
+    done
+    rmdir "$ONEOS_SWITCH_LOCK" 2>/dev/null
+    mkdir "$ONEOS_SWITCH_LOCK" 2>/dev/null || refuse "could not take the switch lock"
+fi
+trap 'rmdir "$ONEOS_SWITCH_LOCK" 2>/dev/null' EXIT INT TERM
+
 # Root tools: the root manager's own busybox and resetprop (KernelSU, APatch,
 # Magisk), never whatever a search of /data finds (OneLineage fell back to
 # `find /data -name busybox`). A missing resetprop is fatal: without it
@@ -222,7 +238,7 @@ fi
 # The guarded framework jars (scripts/make-overlays.sh: storage, installd,
 # power, sysrq and weaver guards). guest_prepare.sh checks them again.
 for need in $GUARD_JARS; do
-    sum=$(awk -v n="$need" '$2 == n {print $1}' "$STAGE/guards.txt")
+    sum=$(awk -v n="$need" '$2 == n && $1 ~ /^[0-9a-f]{64}$/ {print $1}' "$STAGE/guards.txt")
     [ -n "$sum" ] && [ "$(sha256sum "$STAGE/$need" 2>/dev/null | cut -d' ' -f1)" = "$sum" ] ||
         refuse "$need is missing or not the guarded build in guards.txt"
 done
@@ -2370,10 +2386,20 @@ while true; do
             # a path in One UI's /data (an older marker, a file, still counts).
             if [ $GUEST_OPLUS = 0 ] && [ -L $STAGE/data/oneos_blur_default ]; then
                 echo \"[UI Activator] window blur: data/oneos_blur_default is a link, not made by OneOS; left alone\"
-            elif [ $GUEST_OPLUS = 0 ] && [ $GUEST_BLUR = 1 ] && [ ! -e $STAGE/data/oneos_blur_default ]; then
-                $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put global disable_window_blurs 0 >/dev/null 2>&1 &&
-                    mkdir $STAGE/data/oneos_blur_default 2>/dev/null &&
-                    echo \"[UI Activator] window blur: allowed (disable_window_blurs 0, first boot of this stage)\"
+            elif [ $GUEST_OPLUS = 0 ] && [ $GUEST_BLUR = 1 ]; then
+                _HRP=/data/adb/ksu/bin/resetprop
+                [ -x \"\$_HRP\" ] || _HRP=/data/adb/ap/bin/resetprop
+                if [ -x \"\$_HRP\" ]; then
+                    \"\$_HRP\" -n ro.surface_flinger.supports_background_blur 1 >/dev/null 2>&1
+                fi
+                setprop ro.surface_flinger.supports_background_blur 1 2>/dev/null || true
+                if [ ! -e $STAGE/data/oneos_blur_default ]; then
+                    $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/settings put global disable_window_blurs 0 >/dev/null 2>&1 &&
+                        mkdir $STAGE/data/oneos_blur_default 2>/dev/null &&
+                        echo \"[UI Activator] window blur: allowed (disable_window_blurs 0, first boot of this stage)\"
+                fi
+                BL=\$(timeout 10 $BB nsenter -t \$PID -m /system/bin/sh /data/oneos_genv.sh /system/bin/dumpsys window windows 2>/dev/null | grep -m 1 -o 'mBlurEnabled=[a-z]*' | sed 's/.*=//')
+                echo \"[UI Activator] window blur: mBlurEnabled=\${BL:-unknown} (prop=\$(getprop ro.surface_flinger.supports_background_blur))\"
             fi
             # Cache quotas (S25 Ultra session af6c2b17): installd.setAppQuota is
             # blocked in the container (guest_installd_abi.py; quotas are set on
@@ -3702,6 +3728,13 @@ if [ "$RETURN_MAX" -gt 0 ]; then
             # start over, with grace for the new boot's zygote and surfaceflinger,
             # and the home screen counts once this boot's activator pass says so.
             if [ \"\$req\" = ksud:soft-reboot ] && [ -f $STAGE/tmp/guest_softreboot.sh ]; then
+                last=\$(cat $STAGE/tmp/softreboot.last 2>/dev/null)
+                now=\$(date +%s)
+                if [ -n \"\$last\" ] && [ \"\$((now - last))\" -lt 90 ]; then
+                    setprop oneos.guest.powerctl ''
+                    echo \"\$(date) soft reboot deferred: last one \$((now - last))s ago (guest still settling)\"
+                    continue
+                fi
                 setprop oneos.guest.powerctl ''
                 echo \"\$(date) guest requested a soft reboot (\$req) after \${t}s\"
                 if BB=$BB timeout 120 /system/bin/sh $STAGE/tmp/guest_softreboot.sh \"\$req\"; then
