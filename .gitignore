@@ -1,5 +1,6 @@
 firmware/
 out/
+.work/
 build/
 *.raw
 *.img
