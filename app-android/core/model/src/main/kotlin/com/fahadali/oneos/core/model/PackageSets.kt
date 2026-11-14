@@ -307,6 +307,9 @@ object PackageSets {
         // with Samsung IMS (the secims carve-out in services_patched.jar): AT&T on a Z Fold8 had no IMS,
         // so no VoLTE and SMS refused (report d4c481b6).
         PackageFile("telephony-common_patched.jar", FileRole.GUARD_JAR),
+        // Pixel telephonycore: CallAudioState route UNKNOWN freezes Google Dialer in-call UI
+        // (guest_telecom_audio_route.py on framework-telecom.jar in the payload).
+        PackageFile("framework-telecom_patched.jar", FileRole.FRAMEWORK_JAR),
         // 0.4.47 (r4): the image's native camera client with One UI's transaction codes (pixel_camera_native.py).
         PackageFile("libcamera_client_patched.so", FileRole.GUARD_LIBRARY),
         PackageFile("vold_patched", FileRole.GUARD_EXECUTABLE),

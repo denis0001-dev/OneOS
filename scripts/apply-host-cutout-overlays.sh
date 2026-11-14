@@ -4,18 +4,13 @@ set -eu
 STAGE=/data/local/tmp/oneos
 PID=$(pidof system_server | awk '{print $1}')
 [ -n "$PID" ] || exit 1
-BB=$(which busybox 2>/dev/null)
-[ -n "$BB" ] || BB=/data/adb/ksu/bin/busybox
-[ -x "$BB" ] || BB=nsenter
+BB=$(which busybox)
 [ -f "$STAGE/host_statusbar" ] || exit 2
 HSB=$(sed -n 's/^height=//p' "$STAGE/host_statusbar" | head -n 1)
 HRC=$(sed -n 's/^radius=//p' "$STAGE/host_statusbar" | head -n 1)
 HRP=$(sed -n 's/^rect_px=//p' "$STAGE/host_statusbar" | head -n 1)
 HHP=$(sed -n 's/^hole_px=//p' "$STAGE/host_statusbar" | head -n 1)
-run() {
-    if [ "$BB" = nsenter ]; then nsenter -t "$PID" -m /system/bin/sh /data/oneos_genv.sh "$@"
-    else "$BB" nsenter -t "$PID" -m /system/bin/sh /data/oneos_genv.sh "$@"; fi
-}
+run() { "$BB" nsenter -t "$PID" -m /system/bin/sh /data/oneos_genv.sh "$@"; }
 run /system/bin/cmd overlay fabricate --target android --name OneOSCutout \
     android:string/config_mainBuiltInDisplayCutout string "$HHP"
 run /system/bin/cmd overlay fabricate --target android --name OneOSCutoutRect \

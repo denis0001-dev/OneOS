@@ -102,6 +102,18 @@ echo "[Pivoted Root] Rootfs successfully activated as /"
 # guest's /data/local/tmp is the stage's own, made by guest_prepare.sh.
 mkdir -p /data/local/tmp 2>/dev/null
 export TMPDIR=/data/local/tmp
+# Soft-reboot unshare drops host bind mounts; re-apply patched jars as root here
+# (guest screen lock, blur hooks, telephony, ...).
+_oneos_stage=/data/local/tmp/oneos
+if [ -f "$_oneos_stage/guest_bind_patched_jars.sh" ]; then
+    STAGE="$_oneos_stage" BB="$BB" GUEST_INNER=1 /system/bin/sh "$_oneos_stage/guest_bind_patched_jars.sh" ||
+        { echo "[Pivoted Root] FATAL: guest_bind_patched_jars failed"; exit 1; }
+elif [ -f "$_oneos_stage/services_patched.jar" ]; then
+  $BB umount -l /system/framework/services.jar 2>/dev/null || true
+  $BB mount --bind "$_oneos_stage/services_patched.jar" /system/framework/services.jar ||
+    { echo "[Pivoted Root] FATAL: services_patched bind failed"; exit 1; }
+  echo "[Pivoted Root] services_patched.jar bound (inline fallback)"
+fi
 
 # Class paths. This shell inherits the HOST's BOOTCLASSPATH and
 # SYSTEMSERVERCLASSPATH (One UI's, with Samsung jars such as knoxanalyticssdk

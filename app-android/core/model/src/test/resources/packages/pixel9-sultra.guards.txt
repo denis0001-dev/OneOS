@@ -19,6 +19,7 @@
 # 0.4.95: guest_local_lock.py; guest_no_frp_policy.py (guest framework FRP policy off)
 # 0.4.96 r126: guest_local_lock on Pixel (move-result p0); komodo Settings via OneOSSettingsGoogle.apk (not a guard jar)
 # 0.4.96 r130: guest_local_lock PIN metrics + lockscreen.auto_pin_confirm (getBoolean upgrade)
+# 0.4.96 r138: services_patched.jar + guest_blur_force_supported.py (BlurController ignores static CROSS_WINDOW_BLUR_SUPPORTED gate)
 # 0.4.96 r134: services_patched.jar classes5.dex is the full OneOSGuestLock (pinLengthForUser)
 # 0.4.96 r135: PreAuthInfo deviceCredentialAvailable for guest-lock BiometricPrompt (GMS add account)
 d7e2f36da04293e9e434d26fab8a54051d125a3a39e00c7932fac12cf566ecad  services_patched.jar

@@ -265,6 +265,7 @@ pkill -9 -f "zygote_exec" 2>/dev/null || true
 # system_server comes back, so it cannot fight init over sys.usb.config.
 pkill -9 -f "adb_watchdog.sh" 2>/dev/null || true
 pkill -9 -f "ims_watchdog.sh" 2>/dev/null || true
+pkill -9 -f "secims_maintain.sh" 2>/dev/null || true
 oneos_boot_event "Stopping guest system_server"
 pkill -9 -f "system_server" 2>/dev/null || true
 pkill -9 -f org.lineageos 2>/dev/null || true
@@ -544,6 +545,16 @@ if [ -f /data/local/tmp/oneos/data/oneos_root/enabled ]; then
         echo "Guest full-stack runtime: return audit failed; reboot fallback"
         MODE=reboot
     fi
+fi
+# After the allowlist audit, grant KernelSU manager and Termux on One UI again
+# (new installs, or a profile cleared while the guest was running).
+if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
+    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
+fi
+# After the allowlist audit, grant KernelSU manager and Termux on One UI again
+# (new installs, or a profile cleared while the guest was running).
+if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
+    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
 fi
 # After the allowlist audit, grant KernelSU manager and Termux on One UI again
 # (new installs, or a profile cleared while the guest was running).

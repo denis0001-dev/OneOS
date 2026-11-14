@@ -1034,6 +1034,12 @@ elif [ -d "$SAMCAM_SRC" ] && [ "${ONEOS_GUEST_SAMSUNG_CAMERA:-1}" = 1 ]; then
         mkdir -p "$SOV"
         mount | grep -q " $SOV " || $BB mount -t tmpfs -o size=1m,mode=755 tmpfs "$SOV"
         rm -rf "$SOV/up" && mkdir -p "$SOV/up"
+        mkdir -p "$SOV/up/etc/permissions" &&
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<permissions>' '    <feature name="android.hardware.fingerprint" />' '</permissions>' > "$SOV/up/etc/permissions/android.hardware.fingerprint.xml" &&
+            printf '%s\n' '<?xml version="1.0" encoding="utf-8"?>' '<permissions>' '    <feature name="android.hardware.biometrics.face" />' '</permissions>' > "$SOV/up/etc/permissions/android.hardware.biometrics.face.xml" &&
+            chmod 755 "$SOV/up/etc" "$SOV/up/etc/permissions" &&
+            chmod 644 "$SOV/up/etc/permissions/android.hardware.fingerprint.xml" "$SOV/up/etc/permissions/android.hardware.biometrics.face.xml" &&
+            $BB chcon -R u:object_r:system_file:s0 "$SOV/up/etc" 2>/dev/null || true
         echo "Samsung Camera: overlay $(date +%T)"
         if samcam_mountpoints "$SOV/up" sys && guest_root_mountpoint "$SOV/up" &&
            $BB mount -t overlay overlay -o "ro,lowerdir=$SOV/up:$ROOTFS/system" "$ROOTFS/system"; then
@@ -3271,6 +3277,12 @@ elif [ "${ONEOS_GUEST_MOBILE_DATA:-1}" = 1 ] && [ "$HMD" = 1 ] && [ -n "$GDDS" ]
 else
     echo "Guest mobile data: left as it is (One UI: ${HMD:-unknown}, guest data sub: ${GDDS:-none})"
 fi
+# Keep LTE data contexts from idling out during circuit-switched calls (Pixel on
+# Samsung: internet APN goes SUSPENDED for the call, then recovers). Wi-Fi default
+# still wins when connected; this only affects the cellular data call setup policy.
+if [ "${ONEOS_GUEST_MOBILE_DATA:-1}" = 1 ] && [ "$HMD" = 1 ]; then
+    seed_settings "$GSET" settings_global mobile_data_always_on=1
+fi
 # A binary-XML settings file (Pixel: starts with ABX) cannot be read here:
 # run 43 printed "not forced" for it every time. The UI activator sets and
 # logs the guest's density then (oneos_switch.sh, run 44).
@@ -3702,6 +3714,11 @@ else
 fi
 mkdir -p "$STAGE/data/user/0" "$STAGE/data/user_de/0"
 mkdir -p "$STAGE/data/system/users/0" "$STAGE/data/system_de/0/spblob" "$STAGE/data/system_ce/0"
+if [ "${ONEOS_GUEST_STAGE_PIN:-0}" = 1 ]; then
+    mkdir -p "$STAGE/data/system_de/0/oneos_stage_gk"
+    : > "$STAGE/data/oneos_stage_pin"
+    echo "Guest stage PIN: enabled (rebuild overlays with ONEOS_GUEST_STAGE_PIN=1)"
+fi
 # A guest lock state from before the weaver guard (patches/guest_no_weaver.py)
 # holds protectors in the phone's weaver slots, which the guarded framework
 # can no longer read, so the guest could not unlock its own user 0. Only the
@@ -3784,6 +3801,35 @@ mkdir -p "$STAGE/data/anr" "$STAGE/data/app" "$STAGE/data/rollback" "$STAGE/data
 # The guest's own shared storage. Never the phone's /data/media: in run 25 the
 # guest's cleanup of a user it could not prepare deleted the photos in it.
 mkdir -p "$STAGE/data/media/0" "$STAGE/data/media/obb" "$STAGE/data/vendor_de/0" "$STAGE/data/vendor_ce/0"
+# The fingerprint framework makes this before setting the active user; without
+# it FingerprintUpdateActiveUserClient fails and no sensor is ever opened.
+mkdir -p "$STAGE/data/vendor_de/0/fpdata"
+chown 1000:1000 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
+chmod 700 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
+$BB chcon u:object_r:fingerprint_vendor_data_file:s0 "$STAGE/data/vendor_de/0/fpdata" 2>/dev/null || true
+
+# The guest shares the phone's TEE templates; enrolling inside the guest needs a
+# gatekeeper HardwareAuthToken the guest does not have. Mirror One UI's metadata
+# instead (templates stay on the host sensor). AOSP reads settings_fingerprint.xml;
+# One UI writes settings_fingerprint_0.xml.
+BIO_DST=$STAGE/data/system/users/0
+mkdir -p "$BIO_DST" || true
+rm -f "$BIO_DST/settings_fingerprint_0.xml"
+bio=0
+for f in settings_fingerprint_0.xml settings_face.xml face_enrolled_position_0.xml; do
+    out=$f
+    [ "$f" = settings_fingerprint_0.xml ] && out=settings_fingerprint.xml
+    if [ -f "/data/system/users/0/$f" ]; then
+        cp -f "/data/system/users/0/$f" "$BIO_DST/$out" &&
+            chown 1000:1000 "$BIO_DST/$out" 2>/dev/null &&
+            chmod 644 "$BIO_DST/$out" 2>/dev/null &&
+            $BB chcon -h u:object_r:system_data_file:s0 "$BIO_DST/$out" 2>/dev/null
+        bio=$((bio + 1))
+    else
+        rm -f "$BIO_DST/$out"
+    fi
+done
+[ "$bio" -gt 0 ] && echo "Guest biometrics: carried One UI's $bio enrollment file(s) into the guest"
 
 # OneOS: without OneLineage's LineageOS packages (Launcher3, LatinIME,
 # LineageSettings; ColorOS has none of them) and with the OneOS app in place
@@ -5019,9 +5065,19 @@ fi
 # only touches dirs whose *top-level* owner is wrong, so GMS was skipped even
 # though its files were wrong. Do this on both storages, cheaply.
 code_files=0
+# KernelSU's manager rewrites cache/main.jar when listing apps; making it
+# non-writable (0.4.39 test3) leaves SuperUserViewModel on EACCES forever.
+ksu_main_jar() {
+    case "$1" in
+        */me.weishu.kernelsu/cache/main.jar|*/com.rifsxd.ksunext/cache/main.jar|\
+        */com.sukisu.ultra/cache/main.jar|*/app.kitsusu.manager/cache/main.jar) return 0 ;;
+    esac
+    return 1
+}
 for root in /data/user/0 /data/user_de/0; do
     [ -d "$root" ] || continue
     for f in $(find "$root" -type f \( -name '*.apk' -o -name '*.jar' -o -name '*.dex' \) -perm -0200 2>/dev/null); do
+        ksu_main_jar "$f" && continue
         chmod a-w "$f" 2>/dev/null && code_files=$((code_files + 1))
     done
 done
@@ -5601,6 +5657,19 @@ fi
 # framework-wifi_patched.jar (boot class path): VivoTrafficStats on vivo's overseas
 # path (patches/vivo_traffic_stats.py): its natives read One UI's BPF stats maps with
 # vivo's CN layout and aborted system_server (fourth CN run).
+# framework-telecom_patched.jar (Pixel telephonycore): CallAudioState never
+# exposes ROUTE_UNKNOWN to InCallService (guest_telecom_audio_route.py).
+FTJ_SRC="$STAGE/framework-telecom_patched.jar"
+[ -f "$FTJ_SRC" ] || FTJ_SRC=/data/local/tmp/framework-telecom_patched.jar
+for apex in com.android.telephonycore com.android.telephony; do
+    for vdir in "$ROOTFS/apex/$apex" "$ROOTFS/apex/$apex"@*; do
+        FTJ="$vdir/javalib/framework-telecom.jar"
+        [ -f "$FTJ_SRC" ] && [ -f "$FTJ" ] && [ ! -L "$FTJ" ] || continue
+        $BB umount -l "$FTJ" 2>/dev/null || true
+        $BB mount --bind "$FTJ_SRC" "$FTJ" &&
+            echo "Bound framework-telecom_patched.jar ($FTJ_SRC) -> $FTJ (InCall audio routes)"
+    done
+done
 for VWN in vivo-service-wifi framework-wifi; do
     [ -f "$STAGE/${VWN}_patched.jar" ] || continue
     for vdir in "$ROOTFS/apex/com.android.wifi" "$ROOTFS/apex/com.android.wifi"@*; do
@@ -6529,6 +6598,9 @@ if [ -f "$S/data/oneos_root/enabled" ]; then
 fi
 rm -f $S/data/oneos_rec_stop
 command -v oneos_boot_event >/dev/null 2>&1 && oneos_boot_event 'Starting guest services'
+if [ -f "$S/guest_bind_patched_jars.sh" ]; then
+    STAGE="$S" BB="$BB" /system/bin/sh "$S/guest_bind_patched_jars.sh" || exit 1
+fi
 echo "$(date +%T) soft reboot: starting the guest again"
 echo "=== OneOS soft reboot $(date '+%F %T') ($1) ===" >> $S/data/takeover.log
 $BB unshare -m $BB sh $S/data/guest_start.sh </dev/null >>$S/data/takeover.log 2>&1 &
@@ -6599,5 +6671,10 @@ if [ "$SEXT_MOUNT" = 1 ]; then
         echo "ERROR: could not bind /system/system_ext onto /system_ext; not starting the guest"
         exit 3
     fi
+fi
+if [ -f "$STAGE/guest_bind_patched_jars.sh" ]; then
+    STAGE="$STAGE" BB="$BB" /system/bin/sh "$STAGE/guest_bind_patched_jars.sh" || exit 3
+elif [ -f "$STAGE/bin/guest_bind_patched_jars.sh" ]; then
+    STAGE="$STAGE" BB="$BB" /system/bin/sh "$STAGE/bin/guest_bind_patched_jars.sh" || exit 3
 fi
 echo "=== ALL MOUNTS PREPARED SUCCESSFULLY $(date +%T) ==="

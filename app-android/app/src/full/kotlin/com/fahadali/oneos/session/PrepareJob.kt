@@ -404,7 +404,7 @@ object PrepareJob : BackgroundJob<PrepareJob.State>(State(), "oneos-prepare") {
                     val idle = (now - lastByteAt.get()) / 1000
                     val secs = (now - started) / 1000.0
                     val rate = if (secs >= 2 && idle < 3) " · ${Units.bytes((got / secs).toLong())}/s" else ""
-                    val waiting = if (idle >= 3) " · waiting for Google Drive ${idle} s" else ""
+                    val waiting = if (idle >= 3) " · waiting for download server ${idle} s" else ""
                     bytes(stepBase, got, stepDone = got, force = true) {
                         "${finished.get()} of ${downloads.size} files · ${Units.bytes(got)} of ${Units.bytes(need)}$rate$waiting"
                     }

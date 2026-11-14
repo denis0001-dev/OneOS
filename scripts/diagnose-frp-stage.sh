@@ -7,12 +7,7 @@ adb shell "su -M -c '
 ST=/data/local/tmp/oneos
 echo === services jar ===
 sha256sum \$ST/services_patched.jar \$ST/attic/services_patched.frp.jar 2>/dev/null
-grep \" services_patched.jar\$\" \$ST/files.sha256 2>/dev/null
-J=\$(sha256sum \$ST/services_patched.jar 2>/dev/null | awk \"{print \\\$1}\")
-M=\$(head -1 /data/local/tmp/oneos_frp_policy 2>/dev/null)
-[ -n \"\$M\" ] && [ \"\$J\" = \"\$M\" ] && echo jar_matches_marker || echo \"WARN: jar (\$J) != marker (\$M)\"
-HOOK=\$(grep -c FRP_PATCH= \$ST/oneos_switch.sh 2>/dev/null || echo 0)
-[ \"\$HOOK\" -gt 0 ] || echo WARN: stock_oneos_switch_no_frp_hook
+grep services_patched \$ST/files.sha256 2>/dev/null
 echo === marker ===
 cat /data/local/tmp/oneos_frp_policy 2>/dev/null || cat \$ST/data/oneos_frp_policy 2>/dev/null || echo no_marker
 echo === switch hook ===

@@ -1,33 +1,50 @@
-# Guest FRP policy (local / experimental)
+# Guest FRP policy
 
 Samsung's real FRP partition stays One UI's (`guest_pdb_readonly.py`). Guest
 framework code can still treat FRP as active from staged secrets, which blocks
 PIN changes and package installs (`Can't install packages while in secure FRP`).
 
 `switcher/patches/guest_no_frp_policy.py` turns off FRP policy **inside the
-guest** only (locksettings, PDB service APIs, oemlock). It is wired into
-`scripts/make-overlays.sh` for official set builds; until the channel ships it,
-use the phone scripts below.
+guest** only (locksettings, PDB service APIs, oemlock, package install FRP gate).
 
-## Phone workflow
+## Fork (pixel9-sultra): native in the channel
+
+On this fork the patch is part of the normal overlay build and package set:
+
+- `scripts/make-overlays.sh` applies `guest_no_frp_policy` with the other
+  `services_patched.jar` guards (same line as `guest_pdb_init_survives`, etc.).
+- `app-android/packages/pixel9-sultra.guards.txt` and `pixel9-sultra.sha256`
+  pin `services_patched.jar` at the FRP build (`f6a8dfcf…` for r16 + FRP on top
+  of upstream `725ba58e…`).
+
+Rebuild the set overlay and app:
+
+```sh
+scripts/bootstrap-pixel9-frp-overlay.sh    # or make-overlays.sh on a GSI tree
+# embed in the APK (no separate download for the jar):
+./gradlew -p app-android :app:assembleFullDebug -Poneos.series=s25 -Poneos.packSets=true
+```
+
+After **Prepare** on the phone, the channel ships the patched jar; you do **not**
+need `scripts/apply-frp-patch-phone.sh` for day-to-day use.
+
+`oneos_switch.sh` still supports an optional attic override when
+`oneos_frp_policy` exists (legacy / local experiments). Remove it if you rely on
+the channel only:
+
+```sh
+adb shell su -M -c 'rm -f /data/local/tmp/oneos_frp_policy /data/local/tmp/oneos/data/oneos_frp_policy /data/local/tmp/oneos/attic/services_patched.frp.jar'
+```
+
+## Phone-only workflow (upstream or quick test)
 
 ```sh
 export ANDROID_SERIAL=<device>
-scripts/build-frp-services-jar.sh    # pulls stage services_patched.jar, patches, writes /tmp/oneos-frp-only/out.jar
-scripts/apply-frp-patch-phone.sh   # attic jar, oneos_frp_policy marker, hashes, oneos_switch.sh hook
+scripts/build-frp-services-jar.sh
+scripts/apply-frp-patch-phone.sh
 ```
 
-**Important:** OneOS **Prepare** (including a fresh container) restores the app's
-stock `services_patched.jar` and `oneos_switch.sh`, which removes this workaround.
-On One UI, run `scripts/apply-frp-patch-phone.sh` again **after every Prepare**
-and before you switch to Pixel.
-
-After **Prepare**, `oneos_switch.sh` copies
-`attic/services_patched.frp.jar` back when `/data/local/tmp/oneos_frp_policy` (or legacy `data/oneos_frp_policy`) exists.
-
-Remove the workaround:
-
-```sh
-adb shell su -M -c 'rm -f /data/local/tmp/oneos/data/oneos_frp_policy /data/local/tmp/oneos/attic/services_patched.frp.jar'
-# then OneOS Prepare to restore channel services_patched.jar
-```
+Use this when the installed app still downloads upstream `725ba58e…`
+`services_patched.jar`, or before the fork APK with r17 manifests is installed.
+Prepare restores the app's channel jar; re-apply after Prepare if you stay on
+that workflow.

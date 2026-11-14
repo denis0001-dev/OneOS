@@ -27,10 +27,14 @@ from pull request #152 by @vdcoolok.
 - **Not protection for the data.** A restart of the phone always lands in One UI, which has no
   screen lock while OneOS is in use; with root there, the guest's files and the lock record are
   within reach. The guest's storage is not encrypted with this lock.
-- **No fingerprint or face.** Enrolling them needs a token from the phone's gatekeeper, which the
-  guest lock cannot and must not get. "Add fingerprint" in the guest refuses or shows an error.
-- **Not a device credential for apps.** An app that asks for the device PIN in its own prompt, or
-  ties keys or passkeys to the screen lock, behaves as on a phone without a secure lock.
+- **Fingerprint unlock (host enrollments only).** On Pixel- and ColorOS-in-Samsung sets built with
+  `guest_force_aidl_fingerprint.py`, prints enrolled in One UI can unlock the guest: templates stay in
+  the host TEE; `guest_prepare.sh` mirrors enrollment metadata. **New fingerprint or face enroll in
+  the guest** still needs a gatekeeper token the guest does not use.
+- **Not a keystore device credential.** Keys or passkeys that need the phone's gatekeeper auth
+  token still behave as on an unsecured guest. When a guest lock is set, apps that use
+  BiometricPrompt with device credential (e.g. adding a second Google account) can ask for that
+  guest PIN; verification stays in the guest lock record, not the gatekeeper.
 - Nothing of it reaches the phone: no gatekeeper enrolment, no weaver slot, no auth token, no
   keystore call. One UI's lock state is exactly what it was before the session.
 
@@ -73,7 +77,7 @@ lock there):
 | `LockSettingsService.getCredentialType` | the guest lock's type for the lock screen and Settings; the service's own state stays "none", so storage and keys are handled as without a lock |
 | `LockSettingsService.enforceFrpNotActive` | off: in a guest "FRP active" only says that One UI's FRP secret could not be read (`guest_pdb_init_survives.py`), and the only lock behind the check is the guest's own record |
 | `TrustManagerService.notifyKeystoreOfDeviceLockState` | a locked guest is not reported to the phone's keystore daemon (it would drop user 0's unlocked-device keys until the phone itself is unlocked) |
-| `biometrics.PreAuthInfo` | apps' prompts see no device credential: the prompt would need a gatekeeper token |
+| `biometrics.PreAuthInfo` | with a guest lock, apps' credential prompts see device credential available (`OneOSGuestLock.deviceCredentialAvailable`); with no guest lock, none (gatekeeper token path) |
 
 The checks themselves are in `OneOSGuestLock` (`switcher/patches/OneOSGuestLock.java`, one class,
 only `java.*` and `javax.crypto`); `scripts/build-guest-lock-smali.sh` turns it into the smali the

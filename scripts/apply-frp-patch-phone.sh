@@ -17,12 +17,18 @@ fi
 SHA=$(shasum -a 256 "$JAR" | awk '{print $1}')
 echo "FRP jar $SHA"
 adb push "$JAR" /data/local/tmp/services_frp_patched.jar
+adb shell su -M -c "
 ST=/data/local/tmp/oneos
-adb shell "su -M -c 'mkdir -p $ST/attic && cp -f /data/local/tmp/services_frp_patched.jar $ST/attic/services_patched.frp.jar && cp -f $ST/attic/services_patched.frp.jar $ST/services_patched.jar'"
-echo "$SHA" | adb shell "su -M -c 'cat > /data/local/tmp/oneos_frp_policy'"
-adb shell "su -M -c \"sed -i 's/^[0-9a-f]\\\\{64\\\\}  services_patched\\\\.jar/$SHA  services_patched.jar/' $ST/files.sha256 $ST/guards.txt 2>/dev/null; sha256sum $ST/services_patched.jar; grep services_patched $ST/files.sha256 | head -1\""
+mkdir -p \$ST/attic \$ST/data
+cp -f /data/local/tmp/services_frp_patched.jar \$ST/attic/services_patched.frp.jar
+echo $SHA > \$ST/data/oneos_frp_policy
+cp -f \$ST/attic/services_patched.frp.jar \$ST/services_patched.jar
+sed -i 's/^[0-9a-f]\\{64\\}  services_patched\\.jar/$SHA  services_patched.jar/' \$ST/files.sha256 \$ST/guards.txt 2>/dev/null || true
+sha256sum \$ST/services_patched.jar
+grep services_patched \$ST/files.sha256 | head -1
+"
 if [ -f "$ROOT/switcher/assets/oneos_switch.sh" ]; then
-  adb push "$ROOT/switcher/assets/oneos_switch.sh" /data/local/tmp/oneos_switch.sh.new
-  adb shell "su -M -c 'chattr -i $ST/oneos_switch.sh 2>/dev/null; cp -f /data/local/tmp/oneos_switch.sh.new $ST/oneos_switch.sh && chmod 755 $ST/oneos_switch.sh'"
+    adb push "$ROOT/switcher/assets/oneos_switch.sh" /data/local/tmp/oneos_switch.sh.new
+    adb shell su -M -c 'cp -f /data/local/tmp/oneos_switch.sh.new /data/local/tmp/oneos/oneos_switch.sh && chmod 755 /data/local/tmp/oneos/oneos_switch.sh'
 fi
 echo "Done. Restart guest or switch to Pixel; FRP patch re-applies after every app prepare."

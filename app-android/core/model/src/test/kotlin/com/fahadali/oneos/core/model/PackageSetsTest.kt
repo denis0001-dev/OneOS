@@ -39,7 +39,7 @@ class PackageSetsTest {
     @Test
     fun setsAsData() {
         assertEquals(34, n6.files.size) // 0.4.63: + oplus_odm_ai.tar; 0.4.47: + KeKeThemeSpace_patched.apk; 0.4.37: + framework_patched.jar, libcamera_client_patched.so, samcam.tar; 0.4.38 (global): + cellbroadcast, Fold8SystemUI.apk, Fold8AngleRelay.dex; 0.4.39: + telephony-common_patched.jar
-        assertEquals(43, pixel.files.size) // 0.4.59: OneOSFoldCutout.apk, yogi-services_patched.jar, libbootanimation_preapex_patched.so, OneOSPixelLauncher.apk, OneOSPixelDoze.apk; 0.4.24: framework_patched.jar (One UI's camera transaction codes); 0.4.45: telephony-common_patched.jar; 0.4.47: libcamera_client_patched.so, samcam.tar
+        assertEquals(44, pixel.files.size) // + framework-telecom_patched.jar (InCall audio route); 0.4.59: OneOSFoldCutout.apk, yogi-services_patched.jar, …
         assertEquals(Images.ID_FIND_N6, n6.imageId)
         assertEquals(Images.ID_PIXEL_YOGI, pixel.imageId)
         assertEquals("out/overlays_n6g_r16", n6.sourceDir)

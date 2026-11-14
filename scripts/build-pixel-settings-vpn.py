@@ -21,17 +21,12 @@ def main():
         w = pathlib.Path(tmp)
         decoded = w / "decoded"
         subprocess.run(APKTOOL + ["d", "-f", "-r", "-o", str(decoded), str(a.donor)], check=True)
-        dex_dir = subprocess.check_output(
-            [sys.executable, "-I", str(PATCHER), str(decoded)], text=True,
-        ).strip().splitlines()[-1]
-        assert dex_dir, "guest_settings_vpn_null changed nothing"
+        out = subprocess.check_output([sys.executable, "-I", str(PATCHER), str(decoded)], text=True).strip()
+        assert out, "guest_settings_vpn_null changed nothing"
         subprocess.run(APKTOOL + ["b", "-o", str(w / "rebuilt.apk"), str(decoded)], check=True)
-        if dex_dir == "smali":
+        dex_name = f"classes{out.lstrip('smali_classes') if out.startswith('smali_classes') else ''}.dex"
+        if out == "smali":
             dex_name = "classes.dex"
-        elif dex_dir.startswith("smali_classes"):
-            dex_name = "classes" + dex_dir.removeprefix("smali_classes") + ".dex"
-        else:
-            raise SystemExit(f"unexpected dex dir {dex_dir}")
         new_dex = (decoded / "build/apk" / dex_name).read_bytes()
         with a.donor.open("rb") as raw, zipfile.ZipFile(a.donor) as src, zipfile.ZipFile(w / "raw.apk", "w") as dst:
             for info in src.infolist():

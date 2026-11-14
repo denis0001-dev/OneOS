@@ -24,6 +24,8 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdbool.h>
+#include <stdbool.h>
+#include <stdbool.h>
 
 #define BASE "/data/adb/oneos"
 #define SOCK BASE "/run/su.sock"
@@ -351,6 +353,10 @@ int main(int argc,char **argv) {
     }
     if(argc==3&&!strcmp(argv[1],"--unpack"))return unpack(argv[2]);
     if(argc==2&&!strcmp(argv[1],"--host-audit"))return host_audit();
+    if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
+    if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
+    if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
+    if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
     if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
     if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
     if(argc>=3&&!strcmp(argv[1],"--guard-exec"))return getuid()?1:guard_exec(argv+2);

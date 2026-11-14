@@ -271,6 +271,9 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_weaver.py" "$W
 # Nor removes templates from the phone's fingerprint and face sensors, where
 # One UI's enrolments live (patches/guest_no_biometric_cleanup.py).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_biometric_cleanup.py" "$WORK/services")"
+# Samsung's host fingerprint HAL is AIDL v3 only; without this the guest can pick
+# the absent HIDL 2.1 adapter and never open a sensor (guest_force_aidl_fingerprint.py).
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_force_aidl_fingerprint.py" "$WORK/services")"
 # The phone's gatekeeper (screen lock), FRP partition and apexd stay One UI's;
 # guest apps get app ids from 15000 (no keystore namespace shared with One UI's
 # apps) and the guest makes no users or profiles (their per-user keys share
@@ -278,7 +281,7 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_biometric_clea
 # guest_no_apex_installs.py, guest_app_id_offset.py, guest_no_new_users.py; the KernelSU
 # manager keeps One UI's app id (guest_ksu_manager_appid.py, 0.4.39).
 # 0.4.63: the PDB start task survives a failed FRP deactivation (guest_pdb_init_survives.py).
-for g in guest_no_gatekeeper guest_pdb_readonly guest_pdb_init_survives guest_no_frp_policy guest_no_apex_installs guest_app_id_offset guest_ksu_manager_appid guest_no_new_users; do
+for g in guest_no_gatekeeper guest_pdb_readonly guest_pdb_init_survives guest_no_apex_installs guest_app_id_offset guest_ksu_manager_appid guest_no_new_users; do
     NEW=$(python3 -I "$ROOT/switcher/patches/$g.py" "$WORK/services")
     KEY_DIRS="$KEY_DIRS $NEW"
 done
@@ -336,6 +339,9 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/oplus_soundtrigger_no_h
 # rebooted: the reboot took One UI's audio HAL process and the guest's audio down, again
 # and again (patches/guest_soundtrigger_no_reboot.py, 0.4.64).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_soundtrigger_no_reboot.py" "$WORK/services")"
+# Samsung HAL product strategies use vendor audio usages (1005, etc.); catch in
+# AudioSystemAdapter when the framework patch is not on the boot classpath yet.
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_audio_samsung_strategies.py" "$WORK/services")"
 # Pixel's Comfort View as a color matrix, like Night Light (run 43: the switch
 # did nothing; patches/comfort_view_bridge.py). Left out, with a warning, on an
 # image without ColorDisplayService.setUp, and not run for ColorOS: its
@@ -1002,7 +1008,7 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
 # service.incremental_patched.so are listed with the services_patched.jar that
 # looks up "gvld": guest_prepare.sh binds all three or none of them.
 {
-    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
+    echo "# framework overlays built by scripts/make-overlays.sh with the storage, installd, power, sysrq, weaver, biometric, gatekeeper, pdb, guest_no_frp_policy, apexd, appid15000, nousers, nativeservices, wipesecrets and ksuappid guards, and the secims carve-out (com.sec.imsservice kept in android.uid.system from /system_ext/priv-app/OneOSSecIms only)"
     [ "$VOLD_GVLD" = 1 ] && echo "# guest vold name: gvld (vold_patched, service.incremental_patched.so and services_patched.jar)"
     # HyperOS images (miui-services_patched.jar) and Pixel images list their
     # files in the order and with the notes each set was built with.
@@ -1021,7 +1027,7 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
             $([ -f libcamera_client_patched.so ] && echo libcamera_client_patched.so) \
             $([ -f libcameracompatbilityinfo_patched.so ] && echo libcameracompatbilityinfo_patched.so))
     else
-        [ -f "$OUT/framework_patched.jar" ] && echo "# framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py)"
+        [ -f "$OUT/framework_patched.jar" ] && echo "# framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py) and vendor audio usages from Samsung HAL (patches/guest_audio_vendor_usage.py)"
         [ -f "$OUT/telephony-common_patched.jar" ] && echo "# telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py); SEND_SMS error 66 (sent, no result payload) counted as sent (patches/guest_sms_invalid_response.py)"
         [ -f "$OUT/libcamera_client_patched.so" ] && echo "# libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the native camera client with One UI's codes (patches/pixel_camera_native.py)"
         [ -f "$OUT/vivo-services_patched.jar" ] && echo "# vivo: vivo-services_patched.jar (patches/vivo_guards.py: no IOemNetd to One UI's netd, vivo-only HAL extensions; and the storage guards)"
@@ -1651,6 +1657,35 @@ for name in art i18n runtime sdkext nfcservices tethering crashrecovery cellbroa
         echo "payload $name: not in the image (the host's module stays)"
     fi
 done
+
+# Pixel telephonycore: InCall audio route UNKNOWN crashes Google Dialer (Samsung
+# HAL). framework-telecom.jar CallAudioState is patched (guest_telecom_audio_route.py).
+rm -f "$OUT/framework-telecom_patched.jar"
+[ ! -f "$OUT/telephonycore_payload.img" ] || \
+    "$DEBUGFS" -R "dump /javalib/framework-telecom.jar $WORK/framework-telecom.jar" "$OUT/telephonycore_payload.img" 2>/dev/null
+if [ -s "$WORK/framework-telecom.jar" ]; then
+    rm -rf "$WORK/ftc" "$WORK/ftc-rebuilt.jar"
+    case "$APKTOOL" in
+        *.jar) AT() { java -jar "$APKTOOL" "$@"; } ;;
+        *) AT() { "$APKTOOL" "$@"; } ;;
+    esac
+    AT d -q -f -r -o "$WORK/ftc" "$WORK/framework-telecom.jar"
+    DIRS=$(python3 -I "$ROOT/switcher/patches/guest_telecom_audio_route.py" "$WORK/ftc")
+    AT b -q -o "$WORK/ftc-rebuilt.jar" "$WORK/ftc"
+    cp "$WORK/framework-telecom.jar" "$WORK/framework-telecom_patched.jar"
+    for d in $DIRS; do
+        DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"
+        rm -rf "$WORK/ftvdex" && mkdir -p "$WORK/ftvdex"
+        unzip -q -o "$WORK/ftc-rebuilt.jar" "$DEX" -d "$WORK/ftvdex"
+        (cd "$WORK/ftvdex" && zip -q -0 "$WORK/framework-telecom_patched.jar" "$DEX")
+        echo "built framework-telecom_patched.jar (replaced $DEX)"
+    done
+    python3 -I "$ROOT/scripts/check-dex.py" "$WORK/framework-telecom_patched.jar"
+    mv -f "$WORK/framework-telecom_patched.jar" "$OUT/framework-telecom_patched.jar"
+    chmod 644 "$OUT/framework-telecom_patched.jar"
+    rm -rf "$WORK/ftc" "$WORK/ftc-rebuilt.jar" "$WORK/ftvdex"
+fi
+rm -f "$WORK/framework-telecom.jar"
 
 # OneOS inside the guest (app-android/guest): "Back to One UI" from its screen
 # or its Quick Settings tile. guest_prepare.sh puts it in every guest's /oem as

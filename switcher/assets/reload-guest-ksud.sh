@@ -27,11 +27,6 @@ cat > "$KW/ksud" <<'KSUDWRAP'
 # act on the phone's own init (One UI's), so they never run from here.
 case "$1" in
     soft-reboot)
-        if [ -f /data/adb/oneos/.softreboot_install ] ||
-           [ -f /data/local/tmp/oneos/tmp/softreboot.installing ]; then
-            echo "OneOS: soft reboot skipped during module install (this restart applies changes)"
-            exit 0
-        fi
         setprop oneos.guest.powerctl "ksud:soft-reboot"
         echo "OneOS: soft reboot of this system requested"
         exit 0 ;;
@@ -54,6 +49,7 @@ echo "OneOS: ksud.guest missing in this system" >&2
 exit 127
 KSUDWRAP
 chmod 755 "$KW/ksud"
+install_wrapper "$KW/ksud"
 [ -d "$GADB" ] && install_wrapper "$GADB/ksud"
 [ -d "$RADB" ] && install_wrapper "$RADB/ksud"
 mkdir -p "$STAGE/rootfs/data/oneos_ksu"
@@ -89,9 +85,12 @@ if [ -n "$MPID" ] && [ -n "$BB" ]; then
     if [ -n "$APK" ]; then
         LIB=${APK%/base.apk}/lib/arm64/libksud.so
         if "$BB" nsenter -t "$MPID" -m test -f "$LIB" 2>/dev/null; then
-            if "$BB" nsenter -t "$MPID" -m sh -c "cat > '$LIB' && chmod 755 '$LIB'" < "$KW/ksud"; then
+            TMP=/data/local/tmp/oneos-ksud-lib.$$
+            cp -f "$KW/ksud" "$TMP" && chmod 755 "$TMP"
+            if "$BB" nsenter -t "$MPID" -m cp -f "$TMP" "$LIB"; then
                 echo "reload-guest-ksud: manager libksud.so replaced with wrapper"
             fi
+            rm -f "$TMP"
         fi
     fi
 fi

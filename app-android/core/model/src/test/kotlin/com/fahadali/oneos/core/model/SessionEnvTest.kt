@@ -237,6 +237,17 @@ class SessionEnvTest {
         }
     }
 
+    @Test
+    fun ksuManagerIsOnByDefaultAndStrictlyBoolean() {
+        for (profile in Profiles.BUILT_IN.filter { it.enabled }) {
+            val text = SessionEnv.generate(profile)
+            assertTrue(text.contains("${SessionEnv.KSU_MANAGER}=1\n"))
+            assertEquals(emptyList<String>(), SessionEnv.validate(text.replace("${SessionEnv.KSU_MANAGER}=1", "${SessionEnv.KSU_MANAGER}=0")))
+            for (bad in listOf("2", "true", "", "1;reboot"))
+                assertTrue(SessionEnv.validate(text.replace("${SessionEnv.KSU_MANAGER}=1", "${SessionEnv.KSU_MANAGER}=$bad")).isNotEmpty())
+        }
+    }
+
     /** Every knob the file sets is read by the session scripts under that exact name. */
     @Test
     fun knobNamesMatchTheScripts() {

@@ -134,6 +134,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "return_to_oneui.sh" to File(repoRoot, "switcher/assets/return_to_oneui.sh"),
     // 0.4.61 (pull request #58): Samsung rild's new-SMS queue bypass for the guest (inbound SMS).
     "libsec-ril-patch.sh" to File(repoRoot, "switcher/assets/libsec-ril-patch.sh"),
+    "oneos_guest_secims.sh" to File(repoRoot, "switcher/assets/oneos_guest_secims.sh"),
     "check_host_apex.sh" to File(repoRoot, "switcher/assets/check_host_apex.sh"),
     "bridges.sh" to File(repoRoot, "switcher/assets/bridges.sh"),
     "fold8_coloros.sh" to File(repoRoot, "switcher/assets/fold8_coloros.sh"),
@@ -158,10 +159,17 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "host_installd_a16.txt" to File(repoRoot, "switcher/patches/host_installd_a16.txt"),
     // Guest KernelSU: ksud /proc/ -> /data/ mount-namespace patch (guest_prepare.sh).
     "guest_ksud_mount_namespace.py" to File(repoRoot, "switcher/patches/guest_ksud_mount_namespace.py"),
+    // Guest KernelSU: ksud /proc/ -> /data/ mount-namespace patch (guest_prepare.sh).
+    "guest_ksud_mount_namespace.py" to File(repoRoot, "switcher/patches/guest_ksud_mount_namespace.py"),
     // 0.4.96: optional repair on a running session (the switch UI activator does this at boot).
     "apply-host-cutout-overlays.sh" to File(repoRoot, "switcher/assets/apply-host-cutout-overlays.sh"),
+    "guest_bind_patched_jars.sh" to File(repoRoot, "switcher/assets/guest_bind_patched_jars.sh"),
+    "live-guest-lock-reload.sh" to File(repoRoot, "switcher/assets/live-guest-lock-reload.sh"),
     "repair-guest-session.sh" to File(repoRoot, "switcher/assets/repair-guest-session.sh"),
+    "repair-guest-telephony.sh" to File(repoRoot, "switcher/assets/repair-guest-telephony.sh"),
+    "live-guest-telephony.sh" to File(repoRoot, "switcher/assets/live-guest-telephony.sh"),
     "reload-guest-keyguard.sh" to File(repoRoot, "switcher/assets/reload-guest-keyguard.sh"),
+    "reload-guest-ksud.sh" to File(repoRoot, "switcher/assets/reload-guest-ksud.sh"),
     "reload-guest-ksud.sh" to File(repoRoot, "switcher/assets/reload-guest-ksud.sh"),
     "live-guest-blur-ksud.sh" to File(repoRoot, "switcher/assets/live-guest-blur-ksud.sh"),
     "host_ksu_grants.sh" to File(repoRoot, "switcher/assets/host_ksu_grants.sh"),
@@ -512,8 +520,12 @@ android {
         // patcher leaves them as they are). Two phones from findings of 2026-11-11, untested: the Galaxy M35 5G
         // (SM-M356, the A35 5G's systems) and the Galaxy A15 5G with MediaTek (SM-A156, OxygenOS 16 only).
         // 0.4.96 (132), fork: smooth boot (overlays + lock hooks only; no mid-session restarts).
+        // 0.4.96 (132), fork: smooth boot (overlays + lock hooks only; no mid-session restarts).
+        // 0.4.96 (131), fork: UI activator integrates guest audio, cutout fallback, lock refresh.
         // 0.4.96 (131), fork: UI activator integrates guest audio, cutout fallback, lock refresh.
         // 0.4.96 (130), fork: guest lock PIN auto-submit, status bar / audio runtime scripts, Pixel Settings VPN.
+        // 0.4.96 (130), fork: guest lock PIN auto-submit, status bar / audio runtime scripts, Pixel Settings VPN.
+        // 0.4.96 (126), fork: guest screen lock on Pixel, Settings VPN null fix, keyguard when locked.
         // 0.4.96 (126), fork: guest screen lock on Pixel, Settings VPN null fix, keyguard when locked.
         // 0.4.96 (125), not published yet: Restart guest (root for the guest) on slower phones. The scan for the
         // guest's processes in guest_softreboot.sh took 50 s a pass on a Galaxy A34 and ran into the watcher's
@@ -523,7 +535,11 @@ android {
         // launch) left the boot screen on "Shutting down One UI" for good, the reason only in the log (a
         // Galaxy S23 on 0.4.95, twice: One UI's property space nearly full). Root's launch answer now waits
         // for that verdict (switch_verdict in oneos_root.sh) and passes a refusal on. Not tried on a phone yet.
-        versionCode = 134
+        // 0.4.96 (135), fork: host adb_watchdog must not tear down Samsung USB when config has adb.
+        // 0.4.96 (136), fork: Pixel guest fingerprint unlock (AIDL path, bio mirror, guest_runtime keyguard).
+        // 0.4.96 (137), fork: services_patched.jar rebuilt via apktool (manual zip broke guest boot).
+        // 0.4.96 (138), fork: framework_patched.jar + guest_audio_vendor_usage.py (AudioService usage 1005).
+        versionCode = 138
         versionName = "0.4.96"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.

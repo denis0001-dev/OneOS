@@ -54,7 +54,7 @@ def main():
     )
     if not m:
         fail("insecure VPN predicate is not the shape this was written for")
-    new_method = (
+  new_method = (
         ".method public static synthetic " + LAMBDA + "(Lcom/android/internal/net/VpnProfile;)Z\n"
         "    .locals 0\n\n"
         "    # OneOS (patches/guest_settings_vpn_null.py): decode() can be null.\n"
