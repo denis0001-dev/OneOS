@@ -92,7 +92,7 @@ struct ksu_app_profile{
 struct ksu_get_app_profile_cmd{struct ksu_app_profile profile;};
 struct ksu_set_app_profile_cmd{struct ksu_app_profile profile;};
 struct ksu_uid_granted_root_cmd{uint32_t uid;uint8_t granted;};
-static const char *KSU_MANAGERS[]={"me.weishu.kernelsu","com.rifsxd.ksunext","com.sukisu.ultra","app.kitsusu.manager",NULL};
+static const char *KSU_MANAGERS[]={"me.weishu.kernelsu","com.rifsxd.ksunext","com.sukisu.ultra","app.kitsusu.manager","dev.rushiranpise.rmgnext",NULL};
 static int ksu_open_fd(void) {
     if(getuid()!=0)return -1;
     int fd=-1;syscall(SYS_reboot,0xDEADBEEFUL,0xCAFEBABEUL,0,&fd);return fd;
@@ -353,10 +353,6 @@ int main(int argc,char **argv) {
     }
     if(argc==3&&!strcmp(argv[1],"--unpack"))return unpack(argv[2]);
     if(argc==2&&!strcmp(argv[1],"--host-audit"))return host_audit();
-    if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
-    if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
-    if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
-    if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
     if(argc==3&&!strcmp(argv[1],"--host-grant"))return host_grant_package(argv[2]);
     if(argc==2&&!strcmp(argv[1],"--host-grant-core"))return host_grant_core();
     if(argc>=3&&!strcmp(argv[1],"--guard-exec"))return getuid()?1:guard_exec(argv+2);

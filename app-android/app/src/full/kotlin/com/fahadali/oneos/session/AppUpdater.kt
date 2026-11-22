@@ -90,9 +90,16 @@ object AppUpdater : BackgroundJob<AppUpdater.State>(State(), "oneos-update") {
         val prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
         val now = System.currentTimeMillis()
         if (!force && state.phase != Phase.IDLE && now - prefs.getLong("checked", 0) < CHECK_EVERY_MS) return
+        val testUrl = AppUpdate.testUrl(testCode(app))
+        // A debug build is signed with the debug key, so GitHub's release APK cannot replace it
+        // (checkApk refuses it). Skip the banner unless the Drive test channel is on.
+        if (BuildConfig.DEBUG && testUrl == null) {
+            prefs.edit().putLong("checked", now).apply()
+            update(State(Phase.CURRENT))
+            return
+        }
         update(state.copy(phase = Phase.CHECKING, message = null))
         executor.execute {
-            val testUrl = AppUpdate.testUrl(testCode(app))
             val test = testUrl != null
             val r = runCatching { AppUpdate.parse(fetchText(testUrl ?: AppUpdate.URL), test).getOrThrow() }
             prefs.edit().putLong("checked", now).apply()

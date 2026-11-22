@@ -509,16 +509,21 @@ class EnvironmentActivity : EdgeToEdgeActivity() {
         io.execute {
             val result = runCatching {
                 PatchChannels.discover(this, profile.id, image.id)
-                PatchChannels.stableRelease()
+                if (com.fahadali.oneos.BuildConfig.DEBUG) null
+                else PatchChannels.stableRelease()
             }
             runOnUiThread {
                 patchBusy = false
                 if (!isDestroyed) {
                     val release = result.getOrNull()
-                    val message = release?.let {
-                        getString(if (it.versionCode > PatchChannels.stableCode(this)) R.string.patch_channel_stable_newer
-                            else R.string.patch_channel_stable_current, it.versionName)
-                    } ?: result.exceptionOrNull()?.message
+                    val message = when {
+                        com.fahadali.oneos.BuildConfig.DEBUG ->
+                            getString(R.string.patch_channel_stable_current, PatchChannels.stableVersion(this))
+                        release != null ->
+                            getString(if (release.versionCode > PatchChannels.stableCode(this)) R.string.patch_channel_stable_newer
+                                else R.string.patch_channel_stable_current, release.versionName)
+                        else -> result.exceptionOrNull()?.message
+                    }
                     AlertDialog.Builder(this).setTitle(if (result.isSuccess) R.string.patch_channel_refresh else R.string.patch_channel_failed)
                         .setMessage(message).setPositiveButton(android.R.string.ok, null).show()
                     render()

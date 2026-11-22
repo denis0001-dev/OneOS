@@ -582,22 +582,11 @@ if [ -f /data/local/tmp/oneos/data/oneos_root/enabled ]; then
         echo "Guest full-stack runtime: return audit failed; reboot fallback"
         MODE=reboot
     fi
+    if ! STAGE=/data/local/tmp/oneos /system/bin/sh /data/local/tmp/oneos/guest_runtime.sh restore-host-grants; then
+        echo "Guest full-stack runtime: host grant restore failed (KernelSU may need a manual toggle)"
+    fi
 fi
-# After the allowlist audit, grant KernelSU manager and Termux on One UI again
-# (new installs, or a profile cleared while the guest was running).
-if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
-    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
-fi
-# After the allowlist audit, grant KernelSU manager and Termux on One UI again
-# (new installs, or a profile cleared while the guest was running).
-if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
-    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
-fi
-# After the allowlist audit, grant KernelSU manager and Termux on One UI again
-# (new installs, or a profile cleared while the guest was running).
-if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
-    /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh || echo "host_ksu_grants at return: failed"
-fi
+# verify-return + restore-host-grants re-apply live KSU grants the kernel pruned in the guest.
 # OneOS: return by rebooting unless asked otherwise. Restarting One UI in place
 # after a session left one of its decompressed APEXes unreadable every time
 # (NFC, uwb, wifi): SIGBUS crash loops, RescueParty, and once an ext4
@@ -1023,7 +1012,12 @@ say "display: composer, surfaceflinger $(pidof surfaceflinger) and boot animatio
 
 # Audio: a fresh HAL for One UI (the guest's audioserver drove it), then One
 # UI's audioserver. AudioService waits for the policy service with no timeout.
+# Match oneos_switch.sh: stop init's audioserver, then kill stragglers (guest
+# keeper or zygisk helpers can leave a second audioserver alive).
 setprop ctl.stop audioserver
+n=0
+while [ $n -lt 25 ] && pidof audioserver >/dev/null; do n=$((n + 1)); sleep 0.2; done
+kill -9 $(pidof audioserver) 2>/dev/null || true
 AHAL=$(cat $S/host_audio_hal_svcs 2>/dev/null)
 for s in $AHAL; do setprop ctl.stop $s; done
 [ -n "$AHAL" ] && sleep 1

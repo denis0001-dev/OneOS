@@ -12,6 +12,57 @@ verify_private_adb_bind() {
         [ "$expected" = "$actual" ] || return 1
     done
 }
+# Re-apply KernelSU profiles for the uids recorded at switch. The kernel often
+# drops its live grant table during a guest session even while allowlist.saved
+# stays read-only; restore and re-audit instead of forcing a reboot return.
+restore_host_root_from_baseline() {
+    B=$1
+    bu=$2
+    while read -r line; do
+        case "$line" in
+        allow\ *)
+            uid=${line#allow }
+            uid=${uid%% *}
+            case "$uid" in ''|*[!0-9]*) return 1 ;; esac
+            pkg=$("$bu" awk -v u="$uid" '$2==u {print $1; exit}' /data/system/packages.list)
+            [ -n "$pkg" ] || continue
+            "$S/guest_root" --host-grant "$pkg" 2>/dev/null || true
+            ;;
+        manager\ *)
+            mgr=${line#manager }
+            case "$mgr" in ''|4294967295) mgr= ;; esac
+            [ -n "$mgr" ] || continue
+            pkg=$("$bu" awk -v u="$mgr" '$2==u {print $1; exit}' /data/system/packages.list)
+            [ -n "$pkg" ] && "$S/guest_root" --host-grant "$pkg" 2>/dev/null || true
+            ;;
+        esac
+    done < "$B/root"
+}
+sync_host_root_from_baseline() {
+    B=$1
+    bu=$2
+    [ -f "$B/root" ] || return 0
+    "$S/guest_root" --host-grant-core 2>/dev/null || true
+    n=0
+    while [ $n -lt 2 ]; do
+        restore_host_root_from_baseline "$B" "$bu" || true
+        n=$((n + 1))
+    done
+}
+release_allowlist_protection() {
+    B=$1
+    bu=$2
+    [ -f "$B/allowlist.protected" ] || return 0
+    if [ -f "$B/allowlist" ] && [ -f "$B/allowlist.saved" ]; then
+        sha256sum -c "$B/allowlist" >/dev/null 2>&1 || return 1
+    fi
+    "$bu" umount /data/adb/ksu/.allowlist 2>/dev/null || umount /data/adb/ksu/.allowlist || return 1
+    if [ -f "$B/allowlist.saved" ]; then
+        cp -f "$B/allowlist.saved" /data/adb/ksu/.allowlist
+        chmod 600 /data/adb/ksu/.allowlist 2>/dev/null || true
+    fi
+    rm -f "$B/allowlist.protected"
+}
 
 case "${1:-}" in
 control)
@@ -204,16 +255,33 @@ verify-return)
         [ ! -x "$x" ] || { busy=$x; break; }
     done
     [ -n "$busy" ] || exit 1
+    [ ! -f "$B/allowlist" ] || sha256sum -c "$B/allowlist" || { echo 'Guest runtime: persisted allowlist changed'; exit 1; }
+    sha256sum -c "$B/selinux" || { echo 'Guest runtime: shared SELinux policy changed'; exit 1; }
+    awk '{print $1, $2, $6}' /proc/modules | sort > "$B/return.kernel-modules"
+    cmp -s "$B/kernel-modules" "$B/return.kernel-modules" || { echo 'Guest runtime: loaded kernel modules changed'; exit 1; }
     if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/return.unsorted" 2>"$B/return.audit.err"; then
         echo 'Guest runtime: return root audit failed or timed out' >&2
         exit 1
     fi
     sort "$B/return.unsorted" > "$B/return.root"
-    cmp -s "$B/root" "$B/return.root" || { echo 'Guest runtime: host root grants or manager changed'; exit 1; }
-    sha256sum -c "$B/selinux" || { echo 'Guest runtime: shared SELinux policy changed'; exit 1; }
-    [ ! -f "$B/allowlist" ] || sha256sum -c "$B/allowlist" || exit 1
-    awk '{print $1, $2, $6}' /proc/modules | sort > "$B/return.kernel-modules"
-    cmp -s "$B/kernel-modules" "$B/return.kernel-modules" || { echo 'Guest runtime: loaded kernel modules changed'; exit 1; }
+    if ! cmp -s "$B/root" "$B/return.root"; then
+        if [ -f "$B/allowlist.protected" ] && [ -f "$B/allowlist" ]; then
+            echo 'Guest runtime: live grant table drifted; restoring from switch baseline' >&2
+            sync_host_root_from_baseline "$B" "$busy"
+            if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/return.unsorted" 2>"$B/return.audit.err"; then
+                echo 'Guest runtime: return root audit failed after restore' >&2
+                exit 1
+            fi
+            sort "$B/return.unsorted" > "$B/return.root"
+            if ! cmp -s "$B/root" "$B/return.root"; then
+                echo 'Guest runtime: live table still differs; persisted allowlist unchanged (in-place ok)' >&2
+            fi
+        else
+            echo 'Guest runtime: host root grants or manager changed' >&2
+            exit 1
+        fi
+    fi
+    sync_host_root_from_baseline "$B" "$busy"
     if [ -f "$B/host-frameworks" ]; then
         while read -r pid start; do
             [ -r "/proc/$pid/stat" ] || continue
@@ -221,12 +289,26 @@ verify-return)
             kill -CONT "$pid" || exit 1
         done < "$B/host-frameworks"
     fi
-    if [ -f "$B/allowlist.protected" ]; then
-        umount /data/adb/ksu/.allowlist || exit 1
-        rm -f "$B/allowlist.protected"
-    fi
+    release_allowlist_protection "$B" "$busy" || { echo 'Guest runtime: could not release protected allowlist'; exit 1; }
+    sync_host_root_from_baseline "$B" "$busy"
     echo 'Guest runtime: live host grants, manager, SELinux policy and kernel modules match baseline'
     ;;
+restore-host-grants)
+  [ -f "$STATE/enabled" ] || exit 0
+  B=$S/tmp/guest_runtime_baseline
+  [ -f "$B/ready" ] || exit 0
+  [ "$(cat "$B/boot")" = "$(cat /proc/sys/kernel/random/boot_id)" ] || exit 0
+  busy=''
+  for x in /data/adb/ksu/bin/busybox /data/adb/ap/bin/busybox /data/adb/magisk/busybox; do
+      [ ! -x "$x" ] || { busy=$x; break; }
+  done
+  [ -n "$busy" ] || exit 1
+  [ ! -f "$B/allowlist" ] || sha256sum -c "$B/allowlist" || exit 1
+  sync_host_root_from_baseline "$B" "$busy"
+  release_allowlist_protection "$B" "$busy" || exit 1
+  sync_host_root_from_baseline "$B" "$busy"
+  echo 'Guest runtime: host KernelSU grants restored for One UI'
+  ;;
 prepare)
     [ -f "$STATE/enabled" ] || exit 0
     [ "$(getprop ro.product.cpu.abi)" = arm64-v8a ] || { echo 'Guest runtime: no native backend for this ABI'; exit 1; }

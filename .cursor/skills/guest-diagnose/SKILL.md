@@ -41,7 +41,10 @@ adb -s "$SERIAL" pull /data/local/tmp/oneos/oneos_switch.log /tmp/
 ```bash
 adb -s "$SERIAL" logcat -d -b system -b crash | tail -100
 adb -s "$SERIAL" logcat -d | rg -i 'oneos|OneOS|system_server|Zygote' | tail -80
+adb -s "$SERIAL" logcat -d | rg -i 'Invalid usage|AudioAttributes|AudioService' | tail -40
 ```
+
+Guest `Invalid usage 1005` in `AudioAttributes$Builder.setUsage` → land **guest** `framework_patched.jar` / `services_patched.jar` patches (**patcher** skill), not host framework bind.
 
 ## When to escalate
 

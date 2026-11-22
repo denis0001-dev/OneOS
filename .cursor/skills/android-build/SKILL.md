@@ -24,11 +24,13 @@ cd app-android
 ./gradlew :app:assembleFullDebug -Poneos.series=s25
 ```
 
-**packSets** embeds local overlay dirs under `out/` — only when those trees exist:
+**packSets** embeds local overlay dirs under `out/` and checks **sha256 pins** in `app-android/packages/<set>.sha256`. The tree must exist and match pins after jar edits:
 
 ```bash
 ./gradlew :app:assembleFullDebug -Poneos.packSets=true -Poneos.series=s25
 ```
+
+Common set for S25 + Pixel guest image: **pixel9-sultra** → `out/overlays_pixel_komodo_r20` (see `app/build.gradle.kts` `packSets` map). After `patch-built-jar.sh`, refresh `pixel9-sultra.sha256`, `pixel9-sultra.guards.txt`, and `channel-embed.txt` before packSets build.
 
 If `oneosFiles` complains about unknown files in `switcher/assets/`, each name must be in `sessionScripts` or `switcherNotShipped` in `app-android/app/build.gradle.kts`.
 

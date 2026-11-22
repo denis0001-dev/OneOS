@@ -126,7 +126,7 @@ val packedSets: Set<String> = if (seriesId == null) {
 }
 // Session scripts copied from switcher/assets at build time (plus the expected
 // installd table). oneos_tunnel.sh (the server tunnel) and 7zz are never shipped.
-val sessionScripts: Map<String, File> = linkedMapOf(
+val sessionScriptsBase: Map<String, File> = linkedMapOf(
     "guest_runtime.sh" to File(repoRoot, "switcher/assets/guest_runtime.sh"),
     "guest_root" to File(repoRoot, "switcher/assets/guest_root"),
     "guest_zygiskd" to File(repoRoot, "switcher/assets/guest_zygiskd"),
@@ -169,6 +169,7 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     // 0.4.66: One UI 8.5's table, staged as host_installd.txt for SDK 36 (Android 16) images.
     "host_installd_a16.txt" to File(repoRoot, "switcher/patches/host_installd_a16.txt"),
 )
+val sessionScripts: Map<String, File> = sessionScriptsBase
 val switcherNotShipped = setOf(
     "oneos_tunnel.sh", "7zz",
     "guest_bind_patched_jars.sh", "live-guest-lock-reload.sh", "reload-guest-keyguard.sh",

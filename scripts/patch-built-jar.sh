@@ -71,3 +71,6 @@ python3 -I "$ROOT/scripts/dex-container-fix.py" "$JAR" "$W/rebuilt.jar" "$W/out.
 python3 "$ROOT/scripts/check-dex.py" "$W/out.jar" >&2 || true
 mv "$W/out.jar" "$OUT"
 echo "built $OUT"
+if [ "$(basename "$OUT")" = "services_patched.jar" ] || [ "$(basename "$JAR")" = "services_patched.jar" ]; then
+    echo "patch-built-jar: update guards.txt for the jar's new sha256 (make-overlays.sh, or packages/<set>.guards.txt and out/overlays_*/guards.txt)" >&2
+fi

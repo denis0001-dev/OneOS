@@ -6,6 +6,7 @@ build/
 
 # Machine-local
 local.properties
+packages/host-framework-audio-sources/*.jar
 *.keystore
 *.jks
 keystore.properties

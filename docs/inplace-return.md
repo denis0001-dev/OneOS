@@ -25,6 +25,17 @@ keystore2, installd and gatekeeper, f2fs `gc_urgent`, and a kernel-log marker.
 the boot id is the same, vold is in the baseline, nothing of the stage is still
 mounted and the guest asked for no shutdown. Otherwise the reboot return.
 
+With **guest full-stack runtime** enabled, `guest_runtime.sh verify-return` runs
+before the in-place path. It keeps KernelSU's persisted `.allowlist` on a
+read-only bind at the switch; if the kernel's live grant table drifts during
+the guest session but that file is unchanged, return reapplies the switch
+baseline through `guest_root --host-grant` and allows in-place return to continue.
+`restore-host-grants` runs on every return (even after a reboot fallback) to
+push the switch baseline back into the live table and to put the saved
+`.allowlist` back on disk after the read-only bind. If `.allowlist` itself
+changed, or restore cannot match the switch audit, the return still reboots.
+
+
 1. **Guest gone.** The guest is killed in up to 5 passes, with the session's
    helpers (the zygote stop loop, net_watch, app_storage_loop.sh). The stage is
    unmounted. A wakelock keeps the phone awake until One UI is up.

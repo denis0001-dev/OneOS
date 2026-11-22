@@ -45,6 +45,13 @@ RD=$(python3 -I "$ROOT/switcher/patches/guest_secims_ready.py" "$WORK/fw")
 for d in $RD; do
     case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
 done
+# Samsung HAL product strategies can use vendor usages (e.g. 1005). AOSP setUsage
+# rejects them and system_server dies in AudioService (pixel9-sultra on S25 Ultra,
+# 2026-11-10; guest_start.sh audio handover history).
+ADU=$(python3 -I "$ROOT/switcher/patches/guest_audio_vendor_usage.py" "$WORK/fw")
+for d in $ADU; do
+    case " $DIRS " in *" $d "*) ;; *) DIRS="$DIRS $d" ;; esac
+done
 # vivo OriginOS: its camera JSON cache without the 31 five-second waits for
 # vivo's own camera service (switcher/patches/vivo_guards.py framework; the
 # third OriginOS run's system_server was killed by its watchdog). Other

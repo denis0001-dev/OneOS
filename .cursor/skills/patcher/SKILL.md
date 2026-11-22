@@ -54,13 +54,31 @@ Patcher progress:
 
 ### Jar / overlay workflow
 
+Guest fixes use **patched jars in the package set** (`framework_patched.jar`, `services_patched.jar`, …) bind-mounted over the guest image — not a host One UI `framework.jar` baked into the APK. See repo **AGENTS.md** (“How guest patches ship”).
+
+**Incremental** (overlay dir already exists, e.g. `out/overlays_pixel_komodo_r20` for **pixel9-sultra**):
+
 ```bash
-# Example: patch an existing services_patched.jar
-scripts/patch-built-jar.sh <in.jar> switcher/patches/some_patcher.py <out.jar>
-# Then update packages/sizes.txt + channel-embed.txt (sha256 of out.jar)
+export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
+scripts/patch-built-jar.sh out/overlays_pixel_komodo_r20/services_patched.jar \
+  switcher/patches/some_patcher.py /tmp/services_patched.jar.new
+mv /tmp/services_patched.jar.new out/overlays_pixel_komodo_r20/services_patched.jar
 ```
 
-Smali helpers: `scripts/make-overlays.sh`, `scripts/check-dex.py`. See `docs/guest-screen-lock.md`, `docs/guest-frp-policy.md` for patterns.
+**Full tree** — `scripts/make-overlays.sh <system.img> [outdir]` (runs `patch-framework-camera.sh` for framework patchers).
+
+After bytes change, update pins:
+
+- `app-android/packages/<set>.sha256` and `app-android/packages/<set>.guards.txt`
+- `app-android/packages/channel-embed.txt` (and `sizes.txt` when used)
+- `out/overlays_*/guards.txt` if applicable
+- `app-android/core/model/src/test/resources/packages/<set>.sha256` when present
+
+**Samsung guest audio usage 1005** (2026-11): `guest_audio_vendor_usage.py` → `framework_patched.jar`; `guest_audio_samsung_strategies.py` → `services_patched.jar`. Register in `make-overlays.sh` / `patch-framework-camera.sh` for the next full rebuild.
+
+**Do not** reintroduce `host_framework_audio_patched.jar`, Gradle embedding of host `framework.jar`, or bind-mount of host framework in switch/return scripts — deprecated.
+
+Smali helpers: `scripts/check-dex.py`. Patterns: `docs/guest-screen-lock.md`, `docs/guest-frp-policy.md`, `docs/app/patch-catalog.md`.
 
 ### Switcher-only script fix
 

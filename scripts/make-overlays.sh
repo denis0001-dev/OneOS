@@ -418,6 +418,9 @@ KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/oplus_soundtrigger_no_h
 # rebooted: the reboot took One UI's audio HAL process and the guest's audio down, again
 # and again (patches/guest_soundtrigger_no_reboot.py, 0.4.64).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_soundtrigger_no_reboot.py" "$WORK/services")"
+# Samsung HAL product strategies use vendor audio usages (1005, etc.); catch in
+# AudioSystemAdapter when the framework patch is not on the boot classpath yet.
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_audio_samsung_strategies.py" "$WORK/services")"
 # Pixel's Comfort View as a color matrix, like Night Light (run 43: the switch
 # did nothing; patches/comfort_view_bridge.py). Left out, with a warning, on an
 # image without ColorDisplayService.setUp, and not run for ColorOS: its
@@ -1169,7 +1172,7 @@ python3 -I "$ROOT/scripts/check-dex.py" $JARS
             $([ -f libcamera_client_patched.so ] && echo libcamera_client_patched.so) \
             $([ -f libcameracompatbilityinfo_patched.so ] && echo libcameracompatbilityinfo_patched.so))
     else
-        [ -f "$OUT/framework_patched.jar" ] && echo "# framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py)"
+        [ -f "$OUT/framework_patched.jar" ] && echo "# framework_patched.jar: the image's framework.jar with One UI's camera transaction codes (patches/pixel_camera_abi.py), Samsung IMS members (patches/guest_secims_members.py) and vendor audio usages (patches/guest_audio_vendor_usage.py)"
         [ -f "$OUT/telephony-common_patched.jar" ] && echo "# telephony-common_patched.jar: the SMS service centre as an international number (patches/guest_smsc_international.py); SEND_SMS error 66 (sent, no result payload) counted as sent (patches/guest_sms_invalid_response.py)"
         [ -f "$OUT/libcamera_client_patched.so" ] && echo "# libcamera_client_patched.so, libcameracompatbilityinfo_patched.so: the native camera client with One UI's codes (patches/pixel_camera_native.py)"
         [ -f "$OUT/vivo-services_patched.jar" ] && echo "# vivo: vivo-services_patched.jar (patches/vivo_guards.py: no IOemNetd to One UI's netd, vivo-only HAL extensions; and the storage guards)"

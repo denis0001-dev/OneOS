@@ -1874,7 +1874,6 @@ else
     n=0; while [ $n -lt 25 ] && ! service check media.audio_policy 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.2; done
     echo "Host audioserver kept: $(getprop init.svc.audioserver)"
 fi
-
 # Bluetooth audio on a phone with only Samsung's Bluetooth audio HAL (0.4.33).
 # The SM8750 and older Galaxies register vendor.samsung.hardware.bluetooth.audio.
 # ISehBluetoothAudioProviderFactory and not Android's IBluetoothAudioProviderFactory,
