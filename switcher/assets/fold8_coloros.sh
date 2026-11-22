@@ -66,7 +66,19 @@ perf_snapshot() {
     perf_supported || return 0
     PSTATE=$(perf_state); plain_tree "$PSTATE"
     [ -f /sys/devices/system/cpu/cpufreq_limit/cpufreq_max_limit ] && [ -f /sys/kernel/gpu/gpu_max_clock ] || return 0
-    [ ! -f "$PSTATE/pid" ] || ! kill -0 "$(cat "$PSTATE/pid")" 2>/dev/null || fail 'performance worker already active'
+    # A worker counts as running only in this boot and when the pid is still a performance worker: after a
+    # forced restart the pid file stays and its number is soon another process's (11-19 reports 6ee387f1 and
+    # a2cef035, one S23: three starts in three boots refused, "performance worker already active").
+    if [ -f "$PSTATE/pid" ]; then
+        opid=$(cat "$PSTATE/pid" 2>/dev/null)
+        case "$opid" in ''|*[!0-9]*) opid= ;; esac
+        if [ -n "$opid" ] && [ "$(cat "$PSTATE/boot" 2>/dev/null)" = "$(cat /proc/sys/kernel/random/boot_id)" ] &&
+           tr '\0' ' ' < /proc/$opid/cmdline 2>/dev/null | grep -q 'performance-'; then
+            fail 'performance worker already active'
+        fi
+        perf_log "stale performance worker pid ${opid:-?} from $([ "$(cat "$PSTATE/boot" 2>/dev/null)" = "$(cat /proc/sys/kernel/random/boot_id)" ] && echo 'this boot, not running' || echo 'an earlier boot'), cleared"
+        rm -f "$PSTATE/pid"
+    fi
     mkdir -p "$PSTATE"; chmod 700 "$PSTATE"
     for f in stop cpu.last gpu.last cpu.external gpu.external released; do rm -f "$PSTATE/$f"; done
     rmdir "$PSTATE/worker.lock" 2>/dev/null || true
@@ -486,6 +498,19 @@ runtime)
     fi
     if ! content query --uri "$uri" --where 'featurename="com.android.launcher.TASKBAR_ENABLE"' 2>/dev/null | grep -q 'featurename=com.android.launcher.TASKBAR_ENABLE'; then
         content insert --uri "$uri" --bind featurename:s:com.android.launcher.TASKBAR_ENABLE --bind parameters:s:
+        reload=1
+    fi
+    # Wallpaper AOD (ColorOS "panoramic AOD", 0.4.97): SystemUI offers it only with this
+    # app feature (AodFeatureOption.isPanoramicAODFeatureEnable) and a panel that says
+    # so through OPPO's display-panel HAL, which a Galaxy lacks; the set's SystemUI
+    # takes the panel half as given (One UI shows the wallpaper on AOD on these panels).
+    # ONEOS_GUEST_PANORAMIC_AOD=0 leaves it out.
+    if [ "${ONEOS_GUEST_PANORAMIC_AOD:-1}" = 1 ] && ! content query --uri "$uri" --where 'featurename="com.oplus.systemui.panoramic_aod.enable"' 2>/dev/null | grep -q 'parameters=boolean:true'; then
+        # AppFeatureProviderUtils.getBoolean reads "boolean:<value>" from the parameters. The
+        # content tool splits a binding at unescaped colons ("Binding not well formed" on the
+        # Fold8 Ultra, 0.4.97 first try), so the value's colon is escaped.
+        content delete --uri "$uri" --where 'featurename="com.oplus.systemui.panoramic_aod.enable"' 2>/dev/null
+        content insert --uri "$uri" --bind featurename:s:com.oplus.systemui.panoramic_aod.enable --bind 'parameters:s:boolean\:true'
         reload=1
     fi
     # The Find N6 global build's launcher is an export launcher. Pull request #1

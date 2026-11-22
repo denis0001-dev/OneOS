@@ -118,6 +118,12 @@ class MainActivity : AppCompatActivity() {
         val list = findViewById<android.widget.LinearLayout>(R.id.guest_runtime_cards)
         list.removeAllViews()
         val cards = com.fahadali.oneos.shared.NativeCards
+        val apps = cards.section(list, getString(R.string.bring_title), getColor(R.color.preboot_card))
+        cards.row(apps, getString(R.string.bring_entry_title), getString(R.string.bring_entry_summary)) {
+            startActivity(Intent(this, BringAppsActivity::class.java))
+        }
+        animLevelCard(list)
+        fullLogsCard(list)
         val root = cards.section(list, "Root", getColor(R.color.preboot_card))
         cards.row(root, "Root status", if (state.root) "Active · OneOS guest runtime" else state.error ?: "Inactive")
         cards.row(root, "Root permissions", "Manage access for apps in this guest") {
@@ -135,6 +141,53 @@ class MainActivity : AppCompatActivity() {
                     .setMessage(next.error).setPositiveButton(android.R.string.ok,null).show()
             }
         }.isEnabled = state.active
+    }
+
+    /** ColorOS's lighter animation level (0.5.32): only where the session says which level is in effect. */
+    private fun animLevelCard(list: android.widget.LinearLayout) {
+        val level = AnimLevel.current() ?: return
+        val pending = AnimLevel.pending(this)
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val perf = cards.section(list, getString(R.string.anim_title), getColor(R.color.preboot_card))
+        val light = level >= AnimLevel.LIGHT
+        val summary = getString(when {
+            pending -> R.string.anim_applying
+            light -> R.string.anim_light_on
+            else -> R.string.anim_light_off
+        })
+        cards.row(perf, getString(R.string.anim_light_title), summary) {
+            runCatching { AnimLevel.request(this, if (light) AnimLevel.FULL else AnimLevel.LIGHT) }.onFailure { e ->
+                android.widget.Toast.makeText(this, getString(R.string.anim_failed, e.message ?: e.javaClass.simpleName), android.widget.Toast.LENGTH_LONG).show()
+            }
+            // The watcher checks every second, then ColorOS's home screen and status bar restart.
+            list.postDelayed({ if (!isDestroyed) GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) } }, 2500)
+            GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) }
+        }.isEnabled = !pending
+    }
+
+    /** Record full logs from now (0.5.17): hidden when the session's OneOS is too old to answer. */
+    private fun fullLogsCard(list: android.widget.LinearLayout) {
+        val status = FullLogs.status(this)
+        if (status == FullLogs.Status.UNSUPPORTED) return
+        val cards = com.fahadali.oneos.shared.NativeCards
+        val logs = cards.section(list, getString(R.string.logs_title), getColor(R.color.preboot_card))
+        val summary = getString(when (status) {
+            FullLogs.Status.ON -> R.string.full_logs_on
+            FullLogs.Status.STARTING -> R.string.full_logs_starting
+            else -> R.string.full_logs_off
+        })
+        cards.row(logs, getString(R.string.full_logs_title), summary) {
+            AlertDialog.Builder(this).setTitle(R.string.full_logs_title).setMessage(R.string.full_logs_confirm)
+                .setNegativeButton(android.R.string.cancel, null)
+                .setPositiveButton(R.string.full_logs_start) { _, _ ->
+                    runCatching { FullLogs.request(this) }.onFailure { e ->
+                        android.widget.Toast.makeText(this, getString(R.string.full_logs_failed, e.message ?: e.javaClass.simpleName), android.widget.Toast.LENGTH_LONG).show()
+                    }
+                    // The watcher checks every second: show its answer shortly.
+                    list.postDelayed({ if (!isDestroyed) GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) } }, 2500)
+                    GuestRuntime.refresh(this) { if (!isDestroyed) renderRuntime(it) }
+                }.show()
+        }.isEnabled = status == FullLogs.Status.OFF
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -213,7 +266,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun send(reason: String) {
-        startActivity(Intent(this, ReturnSplashActivity::class.java).putExtra(EXTRA_REASON, reason))
+        startActivity(Intent(this, ReturnSplashActivity::class.java).putExtra(EXTRA_REASON, reason)
+            .putExtra(ReturnSplashActivity.EXTRA_ASKED_AT, System.currentTimeMillis()))
     }
 
     /** A request is pending until the watcher takes it (and the phone restarts into One UI). */

@@ -229,6 +229,14 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
                 app, marker, Images.systemName(image), guard::isCancelled,
                 onApps = { update(state.copy(apps = it)) },
             ) { update(state.copy(detail = it, cancellable = false)) }
+            // The apps One UI offers, for the guest's own Bring apps screen. A failure is only logged: the launch goes on.
+            if (!guard.isCancelled()) BringAppsJob.sendCatalog(app)
+        }
+        // Debloater (0.5.32): root's list of apps to hide becomes this system's Debloat screen's, for test runs too
+        // (their setup hides the same folders). A refusal is only logged: the start goes on.
+        if (!guard.isCancelled()) {
+            update(state.copy(detail = "Writing the apps to hide…"))
+            Debloater.beforeLaunch(app, image.id)
         }
         if (!guard.commit()) throw Cancelled()
         update(state.copy(cancellable = false))
@@ -237,13 +245,15 @@ object LaunchJob : BackgroundJob<LaunchJob.State>(State(), "oneos-launch") {
             app,
             SessionPrefs.Launch(sid, dryRun, profile.id, image.id, System.currentTimeMillis(), SystemClock.elapsedRealtime(), logsCollected = false),
         )
+        if (!dryRun) com.fahadali.oneos.report.UsageCheckIn.switchStarted(app)
         update(state.copy(detail = "Root is checking everything again and starting the switch…"))
         val reply = RootVerbs.run(
             app, RootScript.Verb.LAUNCH,
             listOf(
                 if (dryRun) "dry" else "session", BuildConfig.VERSION_CODE.toString(), sid, if (hideGms) "1" else "0",
                 if (SessionPrefs.heatCap(app)) "1" else "0", if (secIms) "1" else "0", if (edmStub) "1" else "0",
-                if (SessionPrefs.verboseBoot(app)) "1" else "0",
+                if (SessionPrefs.verboseBoot(app)) "1" else "0", if (SessionPrefs.fullLogs(app)) "1" else "0",
+                if (SessionPrefs.shareFiles(app)) "1" else "0",
             ),
             silenceMs = 5 * 60_000L,
         )

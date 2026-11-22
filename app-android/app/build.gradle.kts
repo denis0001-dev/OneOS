@@ -52,35 +52,45 @@ gradle.taskGraph.whenReady {
 // One UI" app; the ColorOS sets since their 2026-10-25 rebuild), and
 // guest_prepare.sh puts it in the guest's /oem/app.
 val packageSets: Map<String, Pair<File, List<String>>> = linkedMapOf(
-    "n6-global-f8" to (File(repoRoot, "out/fold8-global-current") to listOf("tethering_payload.img", "OneOSFoldCutout.apk", "OneOSTabletQs.apk")),
+    "n6-global-f8" to (File(repoRoot, "out/fold8-global-r0531") to listOf("tethering_payload.img", "OneOSFoldCutout.apk", "OneOSTabletQs.apk")),
     // Find N6 global image (0.4.38), the Z Folds. tethering_payload.img is never mounted.
-    "n6-f8u" to (File(repoRoot, "out/overlays_n6g_r16") to listOf("tethering_payload.img")),
+    "n6-f8u" to (File(repoRoot, "out/overlays_n6g_r23") to listOf("tethering_payload.img")),
     // Find X9 Ultra image, S Ultra: no fold grid either.
     // Find X9 Ultra IN image (0.3.3-0.3.6, again from 0.4.11), the bar phones:
     // the CN set's files (shared by hash) and its cell broadcast module.
-    "x9u-in-sultra" to (File(repoRoot, "out/overlays_x9u_in_r71") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk")),
+    // 0.5.02: the newer Find X9 Ultra IN build (CPH2841IN, 2026-11-01), offered next to the older one.
+    "x9u-in-1105-sultra" to (File(repoRoot, "out/overlays_x9u_in_1105_r9") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk")),
     // Pixel 11 Fold image (0.3.7), Z Fold (F8U): everything a Pixel session uses,
     // OneOSGuest.apk included, and the fold hinge (scripts/make-fold8-pixel.py --variant f8u).
-    "pixel-f8u" to (File(repoRoot, "out/overlays_pixel_f8u_r17") to listOf("tethering_payload.img")),
+    "pixel-f8u" to (File(repoRoot, "out/overlays_pixel_f8u_r21") to listOf("tethering_payload.img")),
     // Pixel 11 Pro image (0.4.10), Galaxy S26 Ultra: the same files from that image.
-    "pixel-sultra" to (File(repoRoot, "out/overlays_pixel_kodiak_r16") to listOf("tethering_payload.img")),
-    "pixel-f8" to (File(repoRoot, "out/overlays_pixel_fold8_r17") to listOf("tethering_payload.img")),
+    "pixel-sultra" to (File(repoRoot, "out/overlays_pixel_kodiak_r20") to listOf("tethering_payload.img")),
+    "pixel-f8" to (File(repoRoot, "out/overlays_pixel_fold8_r21") to listOf("tethering_payload.img")),
     // Pixel 9 Pro XL image (0.4.22), Galaxy S25 Ultra, S25, S25+ and S24 Ultra: the same files from that image.
-    "pixel9-sultra" to (File(repoRoot, "out/overlays_pixel_komodo_r16") to listOf("tethering_payload.img")),
+    "pixel9-sultra" to (File(repoRoot, "out/overlays_pixel_komodo_r20") to listOf("tethering_payload.img")),
     // Infinity-X image (0.4.27), every phone: one set from that image. Its cellbroadcast module
     // is built from source (0.4.28): the guest keeps One UI's, like tethering.
-    "infinityx" to (File(repoRoot, "out/overlays_infinityx_r14") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
+    "infinityx" to (File(repoRoot, "out/overlays_infinityx_r18") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
     // HyperOS image (docs/hyperos.md), made for the Z Fold8 Ultra and Z Fold8, on every phone from 0.4.31: Xiaomi's guarded jars,
     // the signal poll and the image's payloads.
-    "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r26") to listOf("tethering_payload.img")),
+    "hyper-f8u" to (File(repoRoot, "out/overlays_hyperos_r30") to listOf("tethering_payload.img")),
+    // HyperOS 4 Global (0.5.27): Xiaomi's global build OS4.0.5.0.XFRMIXM with Google apps (gmssystem payload). Tethering never mounts.
+    "hyper-hk" to (File(repoRoot, "out/overlays_hyperos_hk_r4") to listOf("tethering_payload.img")),
     // Nothing OS 5.0 (0.4.33), the Z Fold8 Ultra only: its chips need SVE/SME.
-    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r33") to listOf("tethering_payload.img")),
+    "nothing-f8u" to (File(repoRoot, "out/overlays_nothing_r40") to listOf("tethering_payload.img")),
+    "nothing-a" to (File(repoRoot, "out/overlays_nothing_a_r8") to listOf("tethering_payload.img")),
     // OxygenOS 16 (0.4.67, experimental), for the phones on One UI 8 (Android 16): no fold overlays, no
     // tethering (One UI's stays), no apex requirement list (no ColorOS set ships one).
-    "oxygen16" to (File(repoRoot, "out/overlays_oxygen16_r2") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk",
+    "oxygen16" to (File(repoRoot, "out/overlays_oxygen16_r3") to listOf("tethering_payload.img", "OneOSWallpapersFoldGrid.apk",
         "OneOSFoldCutout.apk", "OneOSTabletQs.apk", "oneos-apex-requires.txt")),
     // OriginOS 7 (0.4.73, experimental): set r17 = r14 plus the vivo fold cutout overlay (the cover's lens).
-    "originos" to (File(repoRoot, "out/overlays_originos_cn_r18") to listOf("OneOSWallpapersFoldGrid.apk", "OneOSTabletQs.apk")),
+    "originos" to (File(repoRoot, "out/overlays_originos_cn_r22") to listOf("OneOSWallpapersFoldGrid.apk", "OneOSTabletQs.apk")),
+    // LineageOS 24 (0.5.06, experimental): the OnePlus 15 nightly, on every phone that offers Infinity-X. No gmssystem
+    // payload (One UI's Google apps are laid over the guest at session time). Tethering never mounts; its source-built
+    // cellbroadcast module is left out like Infinity-X's.
+    "lineage" to (File(repoRoot, "out/overlays_lineage_r10") to listOf("tethering_payload.img", "cellbroadcast_payload.img")),
+    // One UI 9.5 (0.5.22, untested): the Galaxy S26 Ultra build, on the phones on One UI 9. Tethering never mounts.
+    "oneui95" to (File(repoRoot, "out/overlays_oneui95_r10") to listOf("tethering_payload.img")),
 )
 // The series downloads (0.4.25): -Poneos.series=<id> packs only the sets that
 // app-android/packages/series.txt lists for it (ApkSeries keeps the same lists,
@@ -134,7 +144,6 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     "return_to_oneui.sh" to File(repoRoot, "switcher/assets/return_to_oneui.sh"),
     // 0.4.61 (pull request #58): Samsung rild's new-SMS queue bypass for the guest (inbound SMS).
     "libsec-ril-patch.sh" to File(repoRoot, "switcher/assets/libsec-ril-patch.sh"),
-    "oneos_guest_secims.sh" to File(repoRoot, "switcher/assets/oneos_guest_secims.sh"),
     "check_host_apex.sh" to File(repoRoot, "switcher/assets/check_host_apex.sh"),
     "bridges.sh" to File(repoRoot, "switcher/assets/bridges.sh"),
     "fold8_coloros.sh" to File(repoRoot, "switcher/assets/fold8_coloros.sh"),
@@ -151,28 +160,14 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     // only have Samsung's (switcher/native/oneos_btaudio.cpp, built by build.sh).
     // oneos_switch.sh starts it only on such a phone.
     "oneos_btaudio" to File(repoRoot, "switcher/assets/oneos_btaudio"),
+    // 0.5.17: Nothing OS's Essential key from a Volume Down double press, as a uinput key (switcher/native/oneos_essential_key.c).
+    "oneos_essential_key" to File(repoRoot, "switcher/assets/oneos_essential_key"),
     // 0.4.33: the status bar's dimension overlays on bar phones
     // (switcher/patches/OneOSOverlayDimen.java, build_overlay_dimen.sh).
     "OneOSOverlayDimen.dex" to File(repoRoot, "switcher/assets/OneOSOverlayDimen.dex"),
     "host_installd.txt" to File(repoRoot, "switcher/patches/host_installd.txt"),
     // 0.4.66: One UI 8.5's table, staged as host_installd.txt for SDK 36 (Android 16) images.
     "host_installd_a16.txt" to File(repoRoot, "switcher/patches/host_installd_a16.txt"),
-    // Guest KernelSU: ksud /proc/ -> /data/ mount-namespace patch (guest_prepare.sh).
-    "guest_ksud_mount_namespace.py" to File(repoRoot, "switcher/patches/guest_ksud_mount_namespace.py"),
-    // Guest KernelSU: ksud /proc/ -> /data/ mount-namespace patch (guest_prepare.sh).
-    "guest_ksud_mount_namespace.py" to File(repoRoot, "switcher/patches/guest_ksud_mount_namespace.py"),
-    // 0.4.96: optional repair on a running session (the switch UI activator does this at boot).
-    "apply-host-cutout-overlays.sh" to File(repoRoot, "switcher/assets/apply-host-cutout-overlays.sh"),
-    "guest_bind_patched_jars.sh" to File(repoRoot, "switcher/assets/guest_bind_patched_jars.sh"),
-    "live-guest-lock-reload.sh" to File(repoRoot, "switcher/assets/live-guest-lock-reload.sh"),
-    "repair-guest-session.sh" to File(repoRoot, "switcher/assets/repair-guest-session.sh"),
-    "repair-guest-telephony.sh" to File(repoRoot, "switcher/assets/repair-guest-telephony.sh"),
-    "live-guest-telephony.sh" to File(repoRoot, "switcher/assets/live-guest-telephony.sh"),
-    "reload-guest-keyguard.sh" to File(repoRoot, "switcher/assets/reload-guest-keyguard.sh"),
-    "reload-guest-ksud.sh" to File(repoRoot, "switcher/assets/reload-guest-ksud.sh"),
-    "reload-guest-ksud.sh" to File(repoRoot, "switcher/assets/reload-guest-ksud.sh"),
-    "live-guest-blur-ksud.sh" to File(repoRoot, "switcher/assets/live-guest-blur-ksud.sh"),
-    "host_ksu_grants.sh" to File(repoRoot, "switcher/assets/host_ksu_grants.sh"),
 )
 val switcherNotShipped = setOf("oneos_tunnel.sh", "7zz")
 
@@ -289,14 +284,6 @@ abstract class OneOsFilesTask : DefaultTask() {
                 require(bytes in 1..receiveMax) { "invalid published size: $line" }
                 parts[0] to bytes
             } ?: emptyMap()
-        val repoRoot = packages.get().asFile.parentFile.parentFile
-        val channelEmbedLines = File(packages.get().asFile, "channel-embed.txt").takeIf { it.isFile }?.readLines()
-            ?.filter { it.isNotBlank() && !it.startsWith("#") } ?: emptyList()
-        val channelEmbedHashes = channelEmbedLines.map { line ->
-            val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
-                ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
-            m.groupValues[1]
-        }.toSet()
         fun put(src: File, sum: String) {
             val dst = File(files, sum)
             if (!dst.exists()) src.copyTo(dst)
@@ -305,7 +292,6 @@ abstract class OneOsFilesTask : DefaultTask() {
         // A set file: in the APK (packSets), else its size and Drive id only.
         fun putSet(src: File, sum: String, problems: MutableList<String>) {
             if (pack) { put(src, sum); return }
-            if (sum in channelEmbedHashes) { put(src, sum); return }
             val id = ids[sum]
             if (id == null) { problems += "${src.name} ($sum) is not on Drive: run scripts/release-files.py"; return }
             sizes[sum] = src.length()
@@ -354,15 +340,6 @@ abstract class OneOsFilesTask : DefaultTask() {
         val unknown = switcher.listFiles()!!.filter { it.isFile }.map { it.name }.toSet() - scripts.get().keys - notShipped.get()
         if (unknown.isNotEmpty()) throw GradleException("switcher/assets has $unknown: add it to sessionScripts or switcherNotShipped in app/build.gradle.kts")
         File(setsDir, "scripts.sha256").writeText(render(scriptSums))
-        channelEmbedLines.forEach { line ->
-            val m = Regex("^([0-9a-f]{64})\\s+(.+)$").matchEntire(line.trim())
-                ?: throw GradleException("channel-embed.txt: not '<sha256> <path>': $line")
-            val sum = m.groupValues[1]
-            val src = File(repoRoot, m.groupValues[2])
-            if (!src.isFile) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is missing")
-            if (sha(src) != sum) throw GradleException("channel-embed.txt: ${m.groupValues[2]} is not $sum")
-            put(src, sum)
-        }
         File(files, "index.txt").writeText(sizes.entries.joinToString("") { "${it.key} ${it.value}\n" })
         File(files, "remote.txt").writeText(remote.entries.joinToString("") { "${it.key} ${it.value}\n" })
         val registryFile = File(packages.get().asFile, "patch-sources.json")
@@ -383,7 +360,7 @@ abstract class OneOsFilesTask : DefaultTask() {
             require(Regex("[A-Za-z0-9][A-Za-z0-9_-]*/[A-Za-z0-9][A-Za-z0-9_.-]*").matches(source["repository"] as String))
             require(Regex("[a-z0-9][a-z0-9.-]{0,39}").matches(source["tag"] as String))
             val targets = source["targets"] as List<*>
-            require(targets.isNotEmpty() && targets.distinct().size == targets.size)
+            require((source["discover"] == true || targets.isNotEmpty()) && targets.distinct().size == targets.size)
             for (value in targets) {
                 val target = value as Map<*, *>
                 require(listOf(target["profile"], target["image"], target["set"]) in pairs) { "Unsupported patch target: $target" }
@@ -519,14 +496,6 @@ android {
         // The Pixel sets, Infinity-X and OxygenOS 16 stay without it (their frameworks have another shape; the
         // patcher leaves them as they are). Two phones from findings of 2026-11-11, untested: the Galaxy M35 5G
         // (SM-M356, the A35 5G's systems) and the Galaxy A15 5G with MediaTek (SM-A156, OxygenOS 16 only).
-        // 0.4.96 (132), fork: smooth boot (overlays + lock hooks only; no mid-session restarts).
-        // 0.4.96 (132), fork: smooth boot (overlays + lock hooks only; no mid-session restarts).
-        // 0.4.96 (131), fork: UI activator integrates guest audio, cutout fallback, lock refresh.
-        // 0.4.96 (131), fork: UI activator integrates guest audio, cutout fallback, lock refresh.
-        // 0.4.96 (130), fork: guest lock PIN auto-submit, status bar / audio runtime scripts, Pixel Settings VPN.
-        // 0.4.96 (130), fork: guest lock PIN auto-submit, status bar / audio runtime scripts, Pixel Settings VPN.
-        // 0.4.96 (126), fork: guest screen lock on Pixel, Settings VPN null fix, keyguard when locked.
-        // 0.4.96 (126), fork: guest screen lock on Pixel, Settings VPN null fix, keyguard when locked.
         // 0.4.96 (125), not published yet: Restart guest (root for the guest) on slower phones. The scan for the
         // guest's processes in guest_softreboot.sh took 50 s a pass on a Galaxy A34 and ran into the watcher's
         // 120 s limit, so the phone went back to One UI (a report on 0.4.93). One listing a pass now; the look
@@ -535,16 +504,33 @@ android {
         // launch) left the boot screen on "Shutting down One UI" for good, the reason only in the log (a
         // Galaxy S23 on 0.4.95, twice: One UI's property space nearly full). Root's launch answer now waits
         // for that verdict (switch_verdict in oneos_root.sh) and passes a refusal on. Not tried on a phone yet.
-        // 0.4.96 (135), fork: host adb_watchdog must not tear down Samsung USB when config has adb.
-        // 0.4.96 (136), fork: Pixel guest fingerprint unlock (AIDL path, bio mirror, guest_runtime keyguard).
-        // 0.4.96 (137), fork: services_patched.jar rebuilt via apktool (manual zip broke guest boot).
-        // 0.4.96 (138), fork: framework_patched.jar + guest_audio_vendor_usage.py (AudioService usage 1005).
-        versionCode = 138
-        versionName = "0.4.96"
+        // 0.4.97 (126), not published yet: Bluetooth sound in the guest on Samsung-HAL Snapdragon phones (the
+        // audio HAL registered Qualcomm's provider over oneos_btaudio and every playback start failed with -38,
+        // Galaxy S23 ColorOS; the bridge now takes the name back), and wallpaper AOD in ColorOS on the Z Folds
+        // (Find N6 set r17: SystemUI takes the display-panel half as given; fold8_coloros.sh adds the
+        // panoramic AOD app feature; works on the Fold8 Ultra) and on the bar phones (x9u-in r72,
+        // ColorPanoramicSystemUI.apk, guest_prepare.sh). Bluetooth and the bar phones not tried yet.
+        // 0.4.98 (127), not published yet: AOD and wallpaper AOD in ColorOS on the Z Fold7, Fold6 and Fold5 (Find N6
+        // r18: their own ColorPanoramicSystemUI.apk; they had no AOD at all, report 3ef946ef) and AOD brightness
+        // without OPPO's display HAL on the bar phones (x9u-in r73). Not tried on a phone yet.
+        // 0.4.99 (128), not published yet: the Bluetooth bridge registers again every second. 0.4.97's check never
+        // saw Qualcomm's provider take the name over (S23 reports on 0.4.97: still no Bluetooth sound). Not tried yet.
+        // 0.5.03 (132): session snapshots record which process owns a libtimer.so / POSIX timer thread
+        // (Galaxy S24 family kernel panics in free_pipe_info, 10 reports).
+        // 0.5.02 (131, published 11-13): the newer Find X9 Ultra IN build (coloros17-findx9u-in-1105, CPH2841IN security patch
+        // 2026-11-01) offered after the older one on every phone that has it, untested; set x9u-in-1105-sultra.
+        // 0.5.01 (130, published 11-13): framework_patched.jar of 11 sets with patches/guest_secims_ready.py:
+        // Samsung IMS hears that telephony is ready for a call's callbacks once telephony attaches to the session,
+        // so a declined or ended call ends in the guest (Z Fold8 Pixel, Spectrum, 4bb83bcd). Not tried yet.
+        // 0.5.00 (129, published 11-13): every system on the S23 family (SM8550, HIDL audio HAL) plays A2DP through
+        // the vendor's Bluetooth module with offload off, as One UI does; 0.4.99's bridge got the session but the
+        // offload path failed with -38 (ColorOS 7eeafc87, 5528e31a; Pixel e353ca45). Not tried yet.
+        versionCode = 177
+        versionName = "0.5.34"
         // 0.4.56 (73), TEST CHANNEL ONLY: the Find N6 set's Theme Store logs every OkHttp request and reply (n6g_r7,
         // patches/theme_store_netlog.py) for the owner's "No Data" log; the next public build goes back to n6g_r6.
         // Send to the OneOS team (0.4.29, both editions): the report service's
-        // address and its upload-only key, from the team's server (reports/deploy.sh
+        // address and its upload-only key (0.5.24: the worker is gone, these files no longer exist, so no Send through it; reports go to Telegram)
         // writes them). A build without them shows no Send; Share and Save stay.
         val home = File(System.getProperty("user.home"))
         val reportUrl = File(home, ".oneos-reports-url").takeIf { it.isFile }?.readText()?.trim()

@@ -38,17 +38,17 @@ class PackageSetsTest {
 
     @Test
     fun setsAsData() {
-        assertEquals(34, n6.files.size) // 0.4.63: + oplus_odm_ai.tar; 0.4.47: + KeKeThemeSpace_patched.apk; 0.4.37: + framework_patched.jar, libcamera_client_patched.so, samcam.tar; 0.4.38 (global): + cellbroadcast, Fold8SystemUI.apk, Fold8AngleRelay.dex; 0.4.39: + telephony-common_patched.jar
-        assertEquals(44, pixel.files.size) // + framework-telecom_patched.jar (InCall audio route); 0.4.59: OneOSFoldCutout.apk, yogi-services_patched.jar, …
+        assertEquals(36, n6.files.size) // 0.5.05: + oplus-framework_patched.jar; 0.4.98: + ColorPanoramicSystemUI.apk; 0.4.63: + oplus_odm_ai.tar; 0.4.47: + KeKeThemeSpace_patched.apk; 0.4.37: + framework_patched.jar, libcamera_client_patched.so, samcam.tar; 0.4.38 (global): + cellbroadcast, Fold8SystemUI.apk, Fold8AngleRelay.dex; 0.4.39: + telephony-common_patched.jar
+        assertEquals(43, pixel.files.size) // 0.4.59: OneOSFoldCutout.apk, yogi-services_patched.jar, libbootanimation_preapex_patched.so, OneOSPixelLauncher.apk, OneOSPixelDoze.apk; 0.4.24: framework_patched.jar (One UI's camera transaction codes); 0.4.45: telephony-common_patched.jar; 0.4.47: libcamera_client_patched.so, samcam.tar
         assertEquals(Images.ID_FIND_N6, n6.imageId)
         assertEquals(Images.ID_PIXEL_YOGI, pixel.imageId)
-        assertEquals("out/overlays_n6g_r16", n6.sourceDir)
-        assertEquals("out/overlays_x9u_in_r71", xin.sourceDir)
+        assertEquals("out/overlays_n6g_r23", n6.sourceDir)
+        assertEquals("out/overlays_x9u_in_r75", xin.sourceDir)
         assertEquals(Images.ID_FIND_X9U_IN, xin.imageId)
-        assertEquals("out/overlays_pixel_f8u_r17", pixel.sourceDir)
+        assertEquals("out/overlays_pixel_f8u_r21", pixel.sourceDir)
         assertEquals(
-            listOf(PackageSets.N6_GLOBAL_F8, n6, xin, pixel, PackageSets.PIXEL_SULTRA, PackageSets.PIXEL_F8, PackageSets.PIXEL9_SULTRA,
-                PackageSets.INFINITYX, PackageSets.HYPER_F8U, PackageSets.NOTHING_F8U, PackageSets.OXYGEN16, PackageSets.ORIGINOS),
+            listOf(PackageSets.N6_GLOBAL_F8, n6, PackageSets.X9U_IN_1105_SULTRA, pixel, PackageSets.PIXEL_SULTRA, PackageSets.PIXEL_F8, PackageSets.PIXEL9_SULTRA,
+                PackageSets.INFINITYX, PackageSets.HYPER_F8U, PackageSets.HYPER_HK, PackageSets.NOTHING_F8U, PackageSets.NOTHING_A, PackageSets.OXYGEN16, PackageSets.ORIGINOS, PackageSets.LINEAGE, PackageSets.ONEUI95),
             PackageSets.ALL,
         )
         // Infinity-X (0.4.27): both guard jars, the camera codes (Java and native), the guest vold, the
@@ -56,7 +56,7 @@ class PackageSetsTest {
         // Not its cellbroadcast module (0.4.28): One UI's stays, as tethering does.
         val ifx = PackageSets.INFINITYX
         assertEquals(Images.ID_INFINITYX, ifx.imageId)
-        assertEquals("out/overlays_infinityx_r14", ifx.sourceDir)
+        assertEquals("out/overlays_infinityx_r18", ifx.sourceDir)
         // 0.4.55 (r4): telephony-common_patched.jar (the SMS centre) and samcam.tar (the S26 Ultra's camera).
         assertEquals(36, ifx.files.size)
         // 0.4.33: the status bar's corner padding, as on the Pixel images.
@@ -70,11 +70,44 @@ class PackageSetsTest {
             ifx.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
         )
         assertTrue(ifx.file(PackageSets.GMS_PAYLOAD) != null && ifx.hasReturnApp)
+        // LineageOS 24 (0.5.06): Infinity-X's shape without OPPO's jar, samcam.tar and the Google payload (its Google
+        // apps are One UI's, laid over the guest by guest_google.sh at session time, keyed on this set's id), with the
+        // fold and tablet overlays and the apex requirement list. 20 payloads; neither tethering nor cellbroadcast.
+        val lineage = PackageSets.LINEAGE
+        assertEquals("lineage", lineage.id)
+        assertEquals(Images.ID_LINEAGE, lineage.imageId)
+        assertEquals("out/overlays_lineage_r10", lineage.sourceDir)
+        assertEquals(40, lineage.files.size) // 0.5.14 r6: + samcam_a.tar, samcam_bar.tar; 0.5.07 r3: + libbootanimation_preapex_patched.so; 0.5.06 r2: + OneOSPixelDoze.apk (AOD)
+        assertEquals(20, lineage.files.count { it.role == FileRole.APEX_PAYLOAD })
+        assertEquals(listOf(PackageSets.TETHERING, PackageSets.CELLBROADCAST), lineage.omitted)
+        assertTrue(lineage.file(PackageSets.GMS_PAYLOAD) == null && lineage.file("oplus-services_patched.jar") == null && lineage.file("samcam.tar") == null)
+        assertEquals(
+            listOf("services_patched.jar", "framework_patched.jar", "vold_patched", "service.incremental_patched.so",
+                "libcamera_client_patched.so", "telephony-common_patched.jar"),
+            lineage.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
+        )
+        assertTrue(lineage.hasReturnApp && lineage.file(PackageSets.GUEST_APP)?.role == FileRole.GUEST_APP)
+        // One UI 9.5 (0.5.22): the Galaxy S26 Ultra build's guard jars and camera libraries, the guest vold (r10), no SurfaceFlinger,
+        // its gmssystem payload (presented, ImageRef.presentsGms), 22 payloads and the software floating features list.
+        val oneui = PackageSets.ONEUI95
+        assertEquals("oneui95", oneui.id)
+        assertEquals(Images.ID_ONEUI95, oneui.imageId)
+        assertEquals("out/overlays_oneui95_r10", oneui.sourceDir)
+        assertEquals(39, oneui.files.size) // r9: + samcam_a_oneui.tar; r10: + vold_patched, service.incremental_patched.so
+        assertEquals(22, oneui.files.count { it.role == FileRole.APEX_PAYLOAD })
+        assertEquals(listOf(PackageSets.TETHERING), oneui.omitted)
+        assertEquals(
+            listOf("services_patched.jar", "framework_patched.jar", "vold_patched", "service.incremental_patched.so", "telephony-common_patched.jar", "libcamera_client_patched.so", "libcameracompatbilityinfo_patched.so"),
+            oneui.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
+        )
+        assertTrue(oneui.file(PackageSets.GMS_PAYLOAD) != null && oneui.hasReturnApp && Images.ONEUI95.presentsGms)
+        assertEquals(FileRole.GUEST_FIX, oneui.file("oneui_floating_add.txt")?.role)
+        assertTrue(oneui.file("vold_patched")?.role == FileRole.GUARD_EXECUTABLE && oneui.file("surfaceflinger_patched") == null) // r10: the guest vold as gvld
         // HyperOS (0.4.31 on every phone; made for the Z Fold8 Ultra and Z Fold8): services.jar, Xiaomi's guard jars,
         // framework.jar and the guest vold (r7), the native camera client (r10), the 15 common payloads and bt.
         val hyper = PackageSets.HYPER_F8U
         assertEquals(Images.ID_HYPEROS_LHASA, hyper.imageId)
-        assertEquals("out/overlays_hyperos_r26", hyper.sourceDir)
+        assertEquals("out/overlays_hyperos_r30", hyper.sourceDir)
         assertEquals(39, hyper.files.size) // 0.4.38: + libsurfaceflinger_patched.so; 0.4.59: + telephony, two cameras; 0.4.70: + xiaomi-opt-telephony_patched.jar
         assertEquals(listOf("socket_exec", "libaudiohal_aidl_patched.so", "MiWallpaper_patched.apk", "samcam.tar", "samcam_bar.tar"),
             hyper.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
@@ -85,12 +118,28 @@ class PackageSetsTest {
             hyper.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
         )
         assertTrue(hyper.hasReturnApp && "vold_patched" in hyper.names)
+        // HyperOS 4 Global (0.5.27): the HyperOS guards plus miui-framework.jar, the guest vold, One UI's camera kits and
+        // the 18 payloads with the GmsCore one (presented, as on One UI 9.5).
+        val hk = PackageSets.HYPER_HK
+        assertEquals(Images.ID_HYPEROS_HONGKONG, hk.imageId)
+        assertEquals("out/overlays_hyperos_hk_r4", hk.sourceDir)
+        assertEquals(44, hk.files.size)
+        assertEquals(18, hk.files.count { it.role == FileRole.APEX_PAYLOAD })
+        assertEquals(listOf(PackageSets.TETHERING), hk.omitted)
+        assertEquals(
+            listOf("services_patched.jar", "miui-services_patched.jar", "apprecovery.proinstaller_patched.jar", "framework_patched.jar",
+                "miui-wifi-service_patched.jar", "miui-telephony-common_patched.jar", "telephony-common_patched.jar", "miui-framework_patched.jar",
+                "vold_patched", "service.incremental_patched.so", "libcamera_client_patched.so", "libsurfaceflinger_patched.so"),
+            hk.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
+        )
+        assertTrue(hk.file(PackageSets.GMS_PAYLOAD) != null && hk.hasReturnApp && Images.HYPEROS_HONGKONG.presentsGms)
+        assertEquals(listOf("samcam.tar", "samcam_a.tar", "samcam_bar.tar"), hk.files.filter { it.name.startsWith("samcam") }.map { it.name })
         // Nothing OS (0.4.33), the smallest set: Nothing ships no vendor framework jar, so services.jar and
         // framework.jar carry every guard. The signal-poll injection RRO goes in /oem, after the image's own
         // TelephonyResCommon_Sys.apk in this guest's overlay order (run 10).
         val nothing = PackageSets.NOTHING_F8U
         assertEquals(Images.ID_NOTHING_METROID, nothing.imageId)
-        assertEquals("out/overlays_nothing_r33", nothing.sourceDir)
+        assertEquals("out/overlays_nothing_r40", nothing.sourceDir)
         assertEquals(48, nothing.files.size) // 0.4.55: samcam_bar.tar, the S26 Ultra's camera for the phones
         // r12: Nothing's SystemUI with its quick settings at the screen's own density on the inner panel;
         // r13: its launcher with the drawer's category boxes per row from the width; r17: the ringtone kits
@@ -118,14 +167,10 @@ class PackageSetsTest {
         // The Pixel Fold sets (pull request #1, the F8U's since 0.4.21): the Pixel files, the patched
         // SystemUI, the angle relay and each one's unfold RRO. The bar sets (0.4.59 r12) have only
         // double tap to sleep, from each image's own SystemUI and Pixel Launcher.
-        for (bar in listOf(PackageSets.PIXEL_SULTRA)) {
+        for (bar in listOf(PackageSets.PIXEL_SULTRA, PackageSets.PIXEL9_SULTRA)) {
             assertEquals(listOf("samcam.tar", "OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk"),
                 bar.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name })
         }
-        assertEquals(
-            listOf("samcam.tar", "OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk", "OneOSSettingsGoogle.apk"),
-            PackageSets.PIXEL9_SULTRA.files.filter { it.role == FileRole.GUEST_FIX }.map { it.name },
-        )
         val hinge = listOf("Fold8PixelSystemUI.apk", "Fold8AngleRelay.dex")
         // 0.4.59 (r11): and the boot animation on every panel; r12 the launcher with double tap to sleep.
         val bootanim = listOf("libbootanimation_preapex_patched.so", "OneOSPixelLauncher.apk")
@@ -139,13 +184,7 @@ class PackageSetsTest {
         assertEquals(PackageSets.PIXEL_SULTRA.files.filter { it.role != FileRole.GUEST_FIX } + tent, PackageSets.PIXEL_F8.files.filter { it.role != FileRole.GUEST_FIX })
         // The Pixel 9 Pro XL's set (0.4.22): the same files, from its own image; 0.4.47 its
         // libcameracompatbilityinfo.so needs One UI's codes too.
-        assertEquals(
-            PackageSets.PIXEL_SULTRA.files + listOf(
-                PackageFile("OneOSSettingsGoogle.apk", FileRole.GUEST_FIX),
-                PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY),
-            ),
-            PackageSets.PIXEL9_SULTRA.files,
-        )
+        assertEquals(PackageSets.PIXEL_SULTRA.files + PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY), PackageSets.PIXEL9_SULTRA.files)
         assertEquals(Images.ID_PIXEL_KOMODO, PackageSets.PIXEL9_SULTRA.imageId)
         // One SystemUI build and one relay for both: the APK packs each once.
         val f8uSums = ShaList.parse(shas(pixel)).entries
@@ -177,11 +216,13 @@ class PackageSetsTest {
         val camera = listOf("framework_patched.jar", "telephony-common_patched.jar", "libcamera_client_patched.so")
         for (s in listOf(n6, xin)) {
             val cam = camera
-            assertEquals(listOf("services_patched.jar", "oplus-services_patched.jar") + cam.take(cam.size.coerceAtMost(2)),
+            // 0.5.05: the Find N6 sets carry oplus-framework_patched.jar (IMS calls); the older X9U set does not.
+            val ofw = if (s === n6) listOf("oplus-framework_patched.jar") else emptyList()
+            assertEquals(listOf("services_patched.jar", "oplus-services_patched.jar") + ofw + cam.take(cam.size.coerceAtMost(2)),
                 s.files.filter { it.role == FileRole.GUARD_JAR }.map { it.name })
             assertEquals(
                 s.id,
-                listOf("services_patched.jar", "oplus-services_patched.jar", "vold_patched", "service.incremental_patched.so") + cam,
+                listOf("services_patched.jar", "oplus-services_patched.jar", "vold_patched", "service.incremental_patched.so") + ofw + cam,
                 s.files.filter { it.role in PackageFile.GUARDED }.map { it.name },
             )
             // 0.4.38: the Find N6 global set carries its cell broadcast module too.
@@ -192,7 +233,9 @@ class PackageSetsTest {
         }
         // The IN build's set (0.4.11; 0.4.51 the only Find X9 Ultra build): the Find N6 set's files but the
         // fold's (the wallpaper grid, the Fold8 SystemUI and its hinge relay), with its own guest vold as gvld.
-        assertEquals((n6.names - PackageSets.WALLPAPER_GRID_RRO - "Fold8SystemUI.apk" - "Fold8AngleRelay.dex").toSet(), xin.names.toSet())
+        // 0.4.97 (r72) / 0.4.98: both carry their own ColorPanoramicSystemUI.apk.
+        // 0.5.05: and oplus-framework_patched.jar, which the older X9U set does not get.
+        assertEquals((n6.names - PackageSets.WALLPAPER_GRID_RRO - "Fold8SystemUI.apk" - "Fold8AngleRelay.dex" - "oplus-framework_patched.jar").toSet(), xin.names.toSet())
         // 0.4.47: the global builds' Theme Store without its brand check, the same file in both sets.
         assertEquals(ShaList.parse(shas(n6)).entries[PackageSets.THEME_STORE_APK], ShaList.parse(shas(xin)).entries[PackageSets.THEME_STORE_APK])
         assertEquals(FileRole.GUEST_FIX, n6.file(PackageSets.THEME_STORE_APK)?.role)
@@ -377,7 +420,7 @@ class PackageSetsTest {
             assumeTrue("${f.name} not there yet", f.isFile)
             assertEquals(s.id, emptyList<String>(), s.check(f.readText()))
         }
-        // The IN sets' lists are gone with the image (0.3.7).
+        // The retired IN set's list is gone with its image (0.5.10; the CN set's in 0.3.7).
         assertEquals(PackageSets.ALL.map { "${it.id}.sha256" }.toSet(), dir!!.list()!!.filter { it.endsWith(".sha256") }.toSet())
     }
 
@@ -385,7 +428,7 @@ class PackageSetsTest {
     fun spaceToStage() {
         // AA17: about 27.1 GB for the S Ultra (0.4.51: the X9U IN image + its files + 11 GiB).
         val need = SpaceRule.toStage(Images.FIND_X9U_IN, xin)
-        assertEquals("27.1 GB", Units.bytes(need))
+        assertEquals("27.2 GB", Units.bytes(need)) // 0.4.97: + the wallpaper AOD SystemUI
         // The Pixel image is smaller: its own raw size and files.
         val pixelNeed = SpaceRule.toStage(Images.PIXEL_YOGI, pixel)
         assertEquals(6_559_223_808L + 708_239_363L + 11L * SpaceRule.GIB, pixelNeed)

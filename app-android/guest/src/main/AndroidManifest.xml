@@ -30,11 +30,14 @@
 
         <activity android:name=".ModuleWebActivity" android:exported="false" />
         <activity android:name=".GuestModulesActivity" android:exported="false" />
+        <!-- Bring apps from One UI: lists the catalog the OneOS app left, asks the host session for one app. -->
+        <activity android:name=".BringAppsActivity" android:exported="false" android:label="@string/bring_title" />
         <activity android:name=".GuestRootActivity" android:exported="false" android:windowSoftInputMode="adjustResize">
             <intent-filter><action android:name="android.intent.action.SEARCH" /></intent-filter>
             <meta-data android:name="android.app.searchable" android:resource="@xml/root_searchable" />
         </activity>
-        <activity android:name=".ReturnSplashActivity" android:exported="false" android:launchMode="singleTop" />
+        <activity android:name=".ReturnSplashActivity" android:exported="false" android:launchMode="singleTop"
+            android:excludeFromRecents="true" android:noHistory="true" />
 
         <!-- How's it going? (0.4.30): the checklist, saved in this app's own folder. -->
         <activity
@@ -54,5 +57,12 @@
                 <action android:name="android.service.quicksettings.action.QS_TILE" />
             </intent-filter>
         </service>
+        <!-- 0.5.17: Samsung's Knox provider stand-in for One UI's calling service in OxygenOS (KnoxProviderStub);
+             off here, turned on by the session in an OxygenOS guest only. -->
+        <provider
+            android:name=".KnoxProviderStub"
+            android:authorities="com.sec.knox.provider2"
+            android:enabled="false"
+            android:exported="true" />
     </application>
 </manifest>

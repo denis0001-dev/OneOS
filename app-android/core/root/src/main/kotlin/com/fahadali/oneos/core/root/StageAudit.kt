@@ -407,13 +407,15 @@ object ShellScan {
  * phone's user data, reboots, settings, package wipes or mounts.
  */
 object StageAudit {
-    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "selfupdate", "bring-collect", "bring-clear", "bring-status")
+    val VERBS = listOf("guest-runtime", "guest-module", "guest-module-state", "begin", "receive", "keep-raw", "keep-files", "table", "env", "finish", "launch", "recover", "old-list", "purge", "restore", "remove", "remove-system", "tool-app", "reset-data", "selfupdate", "bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add", "debloat")
 
     val ALLOWED: Set<String> = setOf(
         "umask", "[", "echo", "printf", "id", "stat", "awk", "sed", "grep", "sort", "head", "tail", "cut", "tr", "wc",
         "cat", "ls", "mkdir", "mv", "cp", "rm", "chown", "chmod", "sha256sum", "date", "getprop", "pm", "getevent", "du",
         "env", "unset", "export", "set", "read", "exit", "return", "shift", "true", "false", "break", "continue", "exec",
         "trap", "am", "od", "find", "sleep",
+        // 0.5.17: tool-app off stops the one process whose program is that app's libtimer.so (tool_pids).
+        "kill",
     )
 
     private val WRITES = setOf("mkdir", "mv", "cp", "rm", "chown", "chmod")
@@ -429,7 +431,7 @@ object StageAudit {
     private val STAGE_VARS = setOf("STAGE", "ATTIC", "PLAN", "RECEIVED", "part", "dst", "S", "F", "upd", "upapk", "LOCK", "NEW")
 
     /** Helpers that write their first argument; their call sites must pass a stage path. */
-    private val WRITE_HELPERS = setOf("own", "mkdir_mine", "bring_drop")
+    private val WRITE_HELPERS = setOf("own", "mkdir_mine", "bring_drop", "bring_aside", "bring_clearout")
 
     /**
      * Documented exceptions: `begin aside` renames the stage to its sibling
@@ -468,12 +470,22 @@ object StageAudit {
     private val SELFUPDATE_AM = listOf("start", "-n", "\"\$APP_PACKAGE/.ui.MainActivity\"")
 
     /**
+     * An app's kernel tool (do_tool_app only, 0.5.10): `pm disable-user` of a package whose libtimer.so
+     * runs now, and `pm enable` of one the stage's record names, both for user 0 and `"$2"` only.
+     */
+    private const val TOOL_APP_FUNCTION = "do_tool_app"
+    private val TOOL_APP_PM = setOf(
+        listOf("disable-user", "--user", "0", "\"\$2\""),
+        listOf("enable", "--user", "0", "\"\$2\""),
+    )
+
+    /**
      * Bring apps (0.4.75): the script's reads of One UI's app data, never a
      * write. `$BCE` and `$BDE` are exactly the chosen package's two data
      * folders seen through init's root (`$pkg` is a name is_package accepted),
      * set only in bring_sources, and `$BFROM` the variable of the two loops
      * over exactly their entries. The only commands that may take any of the
-     * three are do_bring_collect's tests (`[`), the one
+     * three are bring_one's tests (`[`), the one
      * `du -sk "$apkdir" "$BCE" "$BDE"` that sizes the app, the two copies into
      * the stage, `cp -a "$BFROM" "$NEW/ce/"` and `cp -a "$BFROM" "$NEW/de/"`
      * (`$NEW` is the copy's place in the stage until it is whole), and
@@ -483,10 +495,13 @@ object StageAudit {
      * them no function: the exact words stand in). No redirection names them,
      * and nowhere else does the script name init's root or run find.
      */
-    private const val BRING_FUNCTION = "do_bring_collect"
+    private const val BRING_FUNCTION = "bring_one"
     private const val BRING_SOURCES_FUNCTION = "bring_sources"
     private const val BCE_VALUE = "\"\$PROC/1/root\$DATA/data/\$pkg\""
     private const val BDE_VALUE = "\"\$PROC/1/root\$DATA/user_de/0/\$pkg\""
+    /** 0.5.31: while a session runs, the switch's read-only view of One UI's folders (guest_prepare.sh). */
+    private const val BCE_LIVE_VALUE = "\"\$T/mnt/oneos_oneui/data/\$pkg\""
+    private const val BDE_LIVE_VALUE = "\"\$T/mnt/oneos_oneui/user_de/0/\$pkg\""
     private val BFROM_WORDS = setOf(
         listOf("\"\$BCE\"/*", "\"\$BCE\"/.[!.]*", "\"\$BCE\"/..?*"),
         listOf("\"\$BDE\"/*", "\"\$BDE\"/.[!.]*", "\"\$BDE\"/..?*"),
@@ -598,13 +613,18 @@ object StageAudit {
                 "L" -> if (a.value != RootScript.LEGACY_STAGE && !a.value.matches(Regex("^/[A-Za-z0-9._/-]+$"))) p += "line ${a.line}: L=${a.value}"
                 "OLD" -> if (!v.startsWith("\$STAGE.old-") && !self) p += "line ${a.line}: OLD=${a.value}"
                 "upsrc" -> if (a.value != UPSRC_VALUE || a.function != SELFUPDATE_FUNCTION) p += "line ${a.line}: upsrc=${a.value}"
-                "BCE" -> if (a.value != BCE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BCE=${a.value}"
-                "BDE" -> if (a.value != BDE_VALUE || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BDE=${a.value}"
+                "BCE" -> if ((a.value != BCE_VALUE && a.value != BCE_LIVE_VALUE) || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BCE=${a.value}"
+                "BDE" -> if ((a.value != BDE_VALUE && a.value != BDE_LIVE_VALUE) || a.function != BRING_SOURCES_FUNCTION) p += "line ${a.line}: BDE=${a.value}"
                 "BFROM" -> p += "line ${a.line}: BFROM=${a.value} (only the loops set it)"
                 "ref" -> if (a.value != BRING_REF_VALUE) p += "line ${a.line}: ref=${a.value}"
                 "OLD_PARENT" -> if (a.value != "\"\$DATA/local/tmp\"") p += "line ${a.line}: OLD_PARENT=${a.value}"
                 "OLDDIR" -> if (a.value != "\"\$OLD_PARENT/\$1\"" || a.function != PURGE_FUNCTION) p += "line ${a.line}: OLDDIR=${a.value}"
                 "RFROM" -> if (a.value != "\"\$OLD_PARENT/\$1\"" || a.function != RESTORE_FUNCTION) p += "line ${a.line}: RFROM=${a.value}"
+                // 0.5.19: an app's kernel tool (libtimer.so in its lib folder) loses its execute bits while the
+                // app is off, and gets them back with tool-app on: the one write outside the stage, in tool-app only.
+                "TOOLF" -> if (a.function != TOOL_APP_FUNCTION || (a.value != "\"\$T\$f\"" && a.value != "\"\$T\$rf\"")) {
+                    p += "line ${a.line}: TOOLF=${a.value}"
+                }
                 "TRASH" -> if (a.function != PURGE_FUNCTION ||
                     !(v.startsWith("\$OLD_PARENT/oneos.trash-") || a.value == "\"\$OLDDIR\"" || self)
                 ) p += "line ${a.line}: TRASH=${a.value}"
@@ -633,7 +653,8 @@ object StageAudit {
                     val purge = c.function == PURGE_FUNCTION && args == listOf("-rf", "\"\$TRASH\"")
                     if (!purge) args.filter { it.startsWith("-") }.forEach { if (it != "-f") p += "line ${c.line}: rm $it" }
                 }
-                "pm" -> if (!(args.firstOrNull() == "path" && args.size == 2) && !(args == SELFUPDATE_PM && c.function == SELFUPDATE_FUNCTION)) {
+                "pm" -> if (!(args.firstOrNull() == "path" && args.size == 2) && !(args == SELFUPDATE_PM && c.function == SELFUPDATE_FUNCTION) &&
+                    !(args in TOOL_APP_PM && c.function == TOOL_APP_FUNCTION)) {
                     p += "line ${c.line}: pm ${args.joinToString(" ")}"
                 }
                 "am" -> if (args != SELFUPDATE_AM || c.function != SELFUPDATE_FUNCTION) p += "line ${c.line}: am ${args.joinToString(" ")}"
@@ -663,6 +684,7 @@ object StageAudit {
                 }
                 for (a in paths) {
                     if (bringCopy && a == "\"\$BFROM\"") continue
+                    if (n == "chmod" && a == "\"\$TOOLF\"" && c.function == TOOL_APP_FUNCTION) continue
                     if (!stagePath(a, c.function, loopVars)) p += "line ${c.line}: $n $a is not under the stage"
                 }
             }

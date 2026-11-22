@@ -126,7 +126,7 @@ class StageAuditTest {
     /** Bring apps: One UI's app data is read by exactly bring-collect's tests, its du and its two copies and bring-status's one find, and never written. */
     @Test
     fun bringReadsOnlyTheChosenAppsDataAndNeverWritesIt() {
-        val b = "do_bring_collect"
+        val b = "bring_one"
         assertTrue(script.contains("$b() {"))
         fun bad(line: String, inFunction: String?, expect: String) {
             val text = if (inFunction != null) script.replace("$inFunction() {", "$inFunction() {\n    $line") else "$script\n$line\n"
@@ -188,7 +188,13 @@ class StageAuditTest {
         bad("bring_drop \"\$BCE\"", b, source)
         bad("bring_drop /data/local/tmp/x", b, "is not under the stage")
         bad("bring_drop \"\$OLD_PARENT/x\"", st, "is not under the stage")
-        assertTrue(StageAudit.VERBS.containsAll(listOf("bring-collect", "bring-clear", "bring-status")))
+        assertTrue(StageAudit.VERBS.containsAll(listOf("bring-collect", "bring-clear", "bring-status", "bring-forget", "bring-catalog", "bring-add")))
+        // The session-time verb and the rest copy through bring_one only.
+        bad("cp -a \"\$BFROM\" \"\$NEW/ce/\"", "do_bring_add", source)
+        bad("[ -d \"\$BCE\" ]", "do_bring_forget", source)
+        bad("mv \"\$dst\" /data/local/tmp/x", "bring_aside", "is not under the stage")
+        bad("bring_aside /data/local/tmp/x", "do_bring_add", "is not under the stage")
+        bad("bring_clearout \"\$BCE\"", "do_bring_add", source)
         bad("rm -rf \"\$STAGE/data/oneos_bring\"", "bring_drop", "rm -r")
         bad("rm -rf \"\$1\"", "bring_drop", "rm -r")
     }
@@ -214,7 +220,14 @@ class StageAuditTest {
         assertEquals(Images.ALL.filter { it.sdk == 36 }.map { it.id }, shVar("IMAGES_SDK36").split(' ').filter { it.isNotEmpty() })
         assertEquals(InstalldExpected.carried(36), shVar("INSTALLD_SHA_36"))
         assertEquals(InstalldExpected.accepted(36), shVar("INSTALLD_OK_36").split(' ').toSet())
-        assertEquals(InstalldExpected.accepted(37), setOf(shVar("INSTALLD_SHA")))
+        // 0.5.28: One UI 9.5's table too, which root accepts only with a set whose guards.txt has RUNTIME_CODES
+        // (the line make-overlays.sh and retrofit-abi-codes.sh write).
+        assertEquals(InstalldExpected.accepted(37), setOf(shVar("INSTALLD_SHA"), shVar("INSTALLD_SHA_95")))
+        assertEquals(InstalldExpected.SHA256_95, shVar("INSTALLD_SHA_95"))
+        val runtimeLine = shVar("RUNTIME_CODES")
+        for (f in listOf("scripts/make-overlays.sh", "scripts/retrofit-abi-codes.sh")) {
+            assertTrue(f, File("../../../$f").readText().contains(runtimeLine))
+        }
         // Enabled profiles only, each with its ids and form (SM- model numbers, and docomo's SC- ones;
         // 0.4.17: the Z Flip7's flip, which root runs with the phone settings; 0.4.74: au's SCG ones).
         val rows = Regex("""^\s+([a-z0-9-]+)\) echo "(S[MC]-\S+|SCG\S+) (\S+) (\S+) (fold|bar|flip)" ;;$""", RegexOption.MULTILINE)
@@ -236,8 +249,8 @@ class StageAuditTest {
         // and the retired images' (0.4.51: the CN Find X9 Ultra build), so their stages are still known.
         val families = Regex("""^\s+([a-z0-9|-]+)\) echo ([a-z]+) ;;$""", RegexOption.MULTILINE)
             .findAll(function("image_family")).flatMap { m -> m.groupValues[1].split('|').map { it to m.groupValues[2] } }.toMap()
-        assertEquals(listOf("coloros17-findx9u"), Images.RETIRED.map { it.id })
-        assertEquals(Images.ALL.associate { it.id to it.family.name.lowercase() } + ("coloros17-findx9u" to "coloros"), families)
+        assertEquals(listOf("coloros17-findx9u", "coloros17-findx9u-in"), Images.RETIRED.map { it.id })
+        assertEquals(Images.ALL.associate { it.id to it.family.name.lowercase() } + ("coloros17-findx9u" to "coloros") + ("coloros17-findx9u-in" to "coloros"), families)
         // data_family reads the same words as status.list, in the same order as StageStatus (Infinity-X first,
         // 0.4.27: its data has OPPO's packages too; then ColorOS, then Pixel, then HyperOS).
         val data = function("data_family")
@@ -258,10 +271,10 @@ class StageAuditTest {
         val common = shVar("SET_COMMON").split(' ')
         // 0.4.51: no set is SET_COMMON alone any more (the debloated Find X9 Ultra set retired); the IN set is
         // SET_COMMON and its own files.
-        assertTrue(PackageSets.X9U_IN_SULTRA.names.containsAll(common))
+        assertTrue(PackageSets.X9U_IN_1105_SULTRA.names.containsAll(common))
         assertEquals(
-            setOf("cellbroadcast_payload.img", "framework_patched.jar", "telephony-common_patched.jar", "libcamera_client_patched.so", "samcam.tar", PackageSets.THEME_STORE_APK, PackageSets.ODM_AI),
-            PackageSets.X9U_IN_SULTRA.names.toSet() - common.toSet(),
+            setOf("oplus-framework_patched.jar", "cellbroadcast_payload.img", "framework_patched.jar", "telephony-common_patched.jar", "libcamera_client_patched.so", "samcam.tar", PackageSets.THEME_STORE_APK, PackageSets.ODM_AI, "ColorPanoramicSystemUI.apk", "samcam_a.tar", "OplusGestureUI_patched.apk", "OplusGestureUI_patched.apk.src_sha256"), // 0.4.97: + wallpaper AOD SystemUI; 0.5.20 r3: + samcam_a.tar; 0.5.32 r8: + raise to wake
+            PackageSets.X9U_IN_1105_SULTRA.names.toSet() - common.toSet(),
         )
         // 0.4.59: the bar Pixel sets add double tap to sleep (their own SystemUI and launcher) to SET_PIXEL.
         assertEquals(PackageSets.PIXEL_SULTRA.names.toSet() - setOf("OneOSPixelSystemUI.apk", "OneOSPixelLauncher.apk"),

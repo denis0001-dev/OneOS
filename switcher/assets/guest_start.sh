@@ -41,6 +41,43 @@ fi
 # vold's bind of the phone's real /data/media and every unbridged /data tree.
 # Nothing in the guest needs it (this namespace is rprivate, so this does not
 # touch the host).
+# Shared folders (0.5.20, owner: "they wanna see their storage, gallery"),
+# ONEOS_SHARE_FILES=1 only: One UI's own DCIM, Pictures, Download, Documents,
+# Movies and Music, held here from the phone's real shared storage
+# (this namespace's copy of host /data with the /data/media bridge taken off;
+# the bridge also covers its pass_through peer) on a root-only tmpfs in this
+# namespace.
+# They are put over the guest's folders only after its vold has mounted its
+# storage (share_folders below): the chown -R/chmod -R of /data/media further
+# down and every recursive pass of guest_prepare.sh over the staged
+# /data/media must never reach One UI's files. This namespace is rprivate, so
+# none of it is ever seen by One UI; all of it ends with the guest.
+SHARE_DIRS="DCIM Pictures Download Documents Movies Music"
+SHARE_HOLD=/dev/.oneos_share
+SHARE_HELD=""
+if [ "${ONEOS_SHARE_FILES:-0}" = 1 ]; then
+    # This namespace's copy of host /data still has the /data/media bridge on it; taken off here only
+    # (rprivate: One UI and its daemons keep theirs), One UI's real storage is under it. A bind from a
+    # mount of another namespace is refused (EINVAL: /proc/<pid>/cwd of a host process, 0.5.20 test).
+    SRC=/postinstall/data/media/0
+    if awk '$5 == "/postinstall/data/media"' /proc/self/mountinfo | grep -q .; then
+        $BB umount -l /postinstall/data/media 2>/dev/null
+    fi
+    awk '$5 == "/postinstall/data/media"' /proc/self/mountinfo | grep -q . && SRC=/nonexistent
+    # Never the guest's own storage (the staged /data/media, this root's /data/media).
+    [ "$(stat -c %d:%i "$SRC" 2>/dev/null)" = "$(stat -c %d:%i /data/media/0 2>/dev/null)" ] && SRC=/nonexistent
+    if [ -d "$SRC/" ] && mkdir -p "$SHARE_HOLD" && $BB mount -t tmpfs -o mode=0700,nosuid,nodev tmpfs "$SHARE_HOLD" &&
+       $BB mount --make-private "$SHARE_HOLD"; then
+        for d in $SHARE_DIRS; do
+            [ -d "$SRC/$d" ] && [ ! -L "$SRC/$d" ] || continue
+            mkdir -p "$SHARE_HOLD/$d" && $BB mount --bind "$SRC/$d" "$SHARE_HOLD/$d" &&
+                $BB mount --make-private "$SHARE_HOLD/$d" && SHARE_HELD="$SHARE_HELD $d"
+        done
+        echo "[Pivoted Root] Shared folders held from One UI's storage:${SHARE_HELD:- none}"
+    else
+        echo "[Pivoted Root] Shared folders: One UI's storage not reachable ($SRC); this session keeps its own"
+    fi
+fi
 $BB umount -l /postinstall 2>/dev/null
 if awk '$5 ~ "^/postinstall(/|$)"' /proc/self/mountinfo | grep -q .; then
     echo "[Pivoted Root] FATAL: host mounts still under /postinstall. Not starting the guest."
@@ -52,12 +89,13 @@ export PATH=/system/bin:/system/xbin
 
 # OneOS: /mnt and /storage came in from the host, and its pass_through,
 # installer, androidwritable, runtime and user views are binds of the phone's
-# real /data/media. Drop them in this (private) namespace before anything in
+# real /data/media (and 0.5.31's read-only One UI view for Bring apps, /mnt/oneos_oneui).
+# Drop them in this (private) namespace before anything in
 # the guest runs; the guest builds its own from its staged /data/media below.
-for m in $(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user)|storage)(/|$)" {print $5}' /proc/self/mountinfo | sort -r); do
+for m in $(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user|oneos_oneui)|storage)(/|$)" {print $5}' /proc/self/mountinfo | sort -r); do
     $BB umount -l "$m" 2>/dev/null
 done
-left=$(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user)|storage)(/|$)"' /proc/self/mountinfo | wc -l)
+left=$(awk '$5 ~ "^/(mnt/(pass_through|installer|androidwritable|runtime|user|oneos_oneui)|storage)(/|$)"' /proc/self/mountinfo | wc -l)
 if [ "$left" != 0 ]; then
     echo "[Pivoted Root] FATAL: $left host storage views still mounted. Not starting the guest."
     exit 1
@@ -176,6 +214,49 @@ done
 # The file has to be absent, not empty: an empty <layouts/> enables no display
 # at all and DisplayManagerService times out waiting for a default display. A
 # copy of the directory without it keeps the per-panel display_id_*.xml.
+# One UI images (0.5.22, guest_prepare.sh): the merged floating feature list and the phone's camera
+# configuration, in this namespace only.
+if [ -f /data/oneos_floating_feature.xml ] && [ -f /vendor/etc/floating_feature.xml ]; then
+    chcon u:object_r:vendor_configs_file:s0 /data/oneos_floating_feature.xml 2>/dev/null
+    $BB mount --bind /data/oneos_floating_feature.xml /vendor/etc/floating_feature.xml && \
+        echo "[Pivoted Root] Floating features: merged list bound over /vendor/etc/floating_feature.xml"
+fi
+if [ -f /data/oneos_system_floating_feature.xml ] && [ -f /system/etc/floating_feature.xml ]; then
+    chcon u:object_r:system_file:s0 /data/oneos_system_floating_feature.xml 2>/dev/null
+    $BB mount --bind /data/oneos_system_floating_feature.xml /system/etc/floating_feature.xml && \
+        echo "[Pivoted Root] Floating features: the image's /system/etc list with the phone's camera lines bound"
+fi
+if [ -d /data/oneos_cameradata ] && [ -d /system/cameradata ]; then
+    chcon -R u:object_r:system_file:s0 /data/oneos_cameradata 2>/dev/null
+    $BB mount --bind /data/oneos_cameradata /system/cameradata && \
+        echo "[Pivoted Root] Camera: the phone's cameradata bound over /system/cameradata"
+fi
+# Video recording on Exynos phones (11-19 report 2991b714, A56 on Nothing OS: rear video froze
+# after 2 s, "couldn't save"): the guest recorded with its own software encoder
+# c2.android.avc.encoder, which faulted reading the camera's 1080p buffer
+# (SIGSEGV SEGV_ACCERR in CopyRow_NEON <- NV12ToI420 <- C2SoftAvcEnc::setEncodeArgs), three
+# times; the phone's Exynos Codec2 service logged nothing, it was never asked. Rank the software
+# video encoders after every other one in this namespace only, so MediaCodecList offers the
+# phone's hardware encoders first; the software ones stay for anything only they can do.
+# Only where the phone's own lists name an Exynos video encoder. ONEOS_GUEST_SW_VENC=keep: as is.
+VPERF=/vendor/etc/media_codecs_performance.xml
+if [ "${ONEOS_GUEST_SW_VENC:-last}" != keep ] && [ -f "$VPERF" ] && grep -q '</MediaCodecs>' "$VPERF" && \
+   cat /vendor/etc/media_codecs*.xml 2>/dev/null | grep -qE 'name="c2\.exynos\.(h264|avc|hevc|h265)\.encoder"'; then
+    VADD=''
+    for c in avc:video/avc hevc:video/hevc; do
+        VADD="$VADD    <MediaCodec name=\"c2.android.${c%%:*}.encoder\" type=\"${c#*:}\" update=\"true\" rank=\"4096\" />\n"
+    done
+    if $BB awk -v add="$VADD" '{ l[NR] = $0 } /<\/MediaCodecs>/ { last = NR }
+            END { for (i = 1; i <= NR; i++) { if (i == last) printf "  <Encoders>\n%s  </Encoders>\n", add; print l[i] } }' \
+            "$VPERF" > /data/oneos_media_codecs_performance.xml && grep -q 'c2.android.avc.encoder" type="video/avc" update="true" rank="4096"' /data/oneos_media_codecs_performance.xml; then
+        chmod 644 /data/oneos_media_codecs_performance.xml
+        chcon u:object_r:vendor_configs_file:s0 /data/oneos_media_codecs_performance.xml 2>/dev/null
+        $BB mount --bind /data/oneos_media_codecs_performance.xml "$VPERF" && \
+            echo "[Pivoted Root] Video encoders: the guest's software AVC/HEVC encoders ranked after the phone's Exynos ones"
+    else
+        echo "[Pivoted Root] Video encoders: $VPERF not rewritten, left as it is"
+    fi
+fi
 DISPLAYCONFIG=/vendor/etc/displayconfig
 LAYOUT_HIDDEN=0
 rm -f /data/oneos_fold_mode /data/oneos_inner_display
@@ -703,7 +784,10 @@ fi
 #    0.4.74 (A34 7e5896b0 81 of 510, A15 336e9373, A17 5G 98780abb, A24 80412f38
 #    ...), the slider did nothing. Only for that pair. A system that goes through
 #    Samsung's lights HAL (HyperOS, Pixel, Infinity-X: "force_anyway? false") is
-#    left alone: two writers on one node would fight.
+#    left alone: two writers on one node would fight. A HAL that silently stops
+#    reaching the panel gets taken over: the bridge watches (fail-closed) and
+#    takes the node over after 15 s of a node stuck at 0 with the screen awake
+#    and asking for light (HyperOS on the A15, 2026-11-15).
 # The guest's brightness (cmd display get-brightness) and wakefulness (dumpsys
 # power) are copied once a second. ColorOS and OxygenOS give a level, not 0..1
 # (222..8191, sunlight boost to 10239: the 0.4.65 loop took that for no value and
@@ -714,13 +798,15 @@ fi
 # a panel node; dozing: 1/20. Ends with the guest.
 # ONEOS_GUEST_LED_BRIDGE=0 / ONEOS_GUEST_BL_BRIDGE=0: off.
 BRIDGE=0
+case "${ONEOS_GUEST_BL_BRIDGE:-1}" in force) BLFORCE=1 ;; *) BLFORCE=0 ;; esac
 if [ $LEDBL = 1 ]; then [ "${ONEOS_GUEST_LED_BRIDGE:-1}" = 1 ] && BRIDGE=1
-elif [ "${ONEOS_GUEST_BL_BRIDGE:-1}" = 1 ] && [ "$BL" = /sys/class/backlight/panel ] && [ -w "$BL/brightness" ]; then
+elif [ "${ONEOS_GUEST_BL_BRIDGE:-1}" != 0 ] && [ "$BL" = /sys/class/backlight/panel ] && [ -w "$BL/brightness" ]; then
     case "$BLMAX" in ''|*[!0-9]*) ;; *) BRIDGE=1 ;; esac
 fi
 if [ $BRIDGE = 1 ]; then
     cat > /data/oneos_bl_bridge.sh <<'BLEOF'
 BL=$1; MAX=$2; ON=$3; LED=$4
+case "${ONEOS_GUEST_BL_BRIDGE:-1}" in force) BLFORCE=1 ;; *) BLFORCE=0 ;; esac
 i=0
 while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
 D=""; n=0
@@ -738,9 +824,57 @@ force=$(echo "$D" | sed -n 's/^useSurfaceControl=[a-z]* (force_anyway? \([a-z]*\
 lo=$(echo "$D" | sed -n 's/^mScreenBrightnessRangeMinimum=//p' | head -n 1)
 hi=$(echo "$D" | sed -n 's/^mScreenBrightnessRangeMaximum=//p' | head -n 1)
 nm=$(echo "$D" | sed -n 's/^mScreenBrightnessNormalMaximum=//p' | head -n 1)
-if [ "$LED" != 1 ] && { [ "$usc" != false ] || [ "$force" != true ]; }; then
-    echo "$(date +%T) brightness bridge: not needed for $BL (useSurfaceControl=${usc:-not read}, force_anyway=${force:-not read})"
-    exit 0
+if [ "$LED" != 1 ] && [ "${BLFORCE:-0}" = 1 ]; then
+    # ONEOS_GUEST_BL_BRIDGE=force skips the watch entirely: for a stage whose
+    # HAL thrashes the node instead of sticking at 0 (HyperOS on the A15,
+    # 2026-11-15: the node jumped 90..469 with the slider at minimum, and a
+    # direct write was over-written within seconds), the bridge restores the
+    # proportional value every second — one writer wins by out-writing.
+    echo "$(date +%T) brightness bridge: forced by ONEOS_GUEST_BL_BRIDGE=force (the HAL thrashes the node; restoring every second)"
+elif [ "$LED" != 1 ] && { [ "$usc" != false ] || [ "$force" != true ]; }; then
+    # A lights-HAL system is normally left alone: two writers on one node would
+    # fight. But a HAL can silently stop reaching the panel: HyperOS on the A15
+    # (2026-11-15) read the node at 0 of 483 while the panel glowed at the
+    # host's last level, and the slider moved the setting without moving the
+    # panel. Watch, fail-closed: take the node over only when it sits at 0 for
+    # 15 s in a row while the screen is awake and asks for light (a real
+    # minimum is a wish, not a dead HAL), and give up after 600 s if the node
+    # moves on its own. Healthy systems never see the takeover.
+    # 0.5.34: or when the HAL refuses the guest's brightness outright. HyperOS on the Galaxy A16 4G (report
+    # f036b5fa, "brightness not fixed"): Samsung's lights HAL answered every MiuiLightsService.setBrightness
+    # with UnsupportedOperationException ("Failed issuing setLightState", 50 times), the node stayed at the
+    # host's last level (not 0), and after 600 s the watch gave the panel to a HAL that never wrote it.
+    # Three such refusals take the node over too.
+    echo "$(date +%T) brightness bridge: watching $BL (useSurfaceControl=${usc:-not read}, force_anyway=${force:-not read}; takes over after 15 s of a dead node or 3 refusals of the lights HAL)"
+    rm -f /data/oneos_bl_refused
+    ( timeout 600 logcat -v brief -T 1 -s LightsService:E 2>/dev/null | grep --line-buffered -F "Failed issuing setLightState" | head -n 3 > /data/oneos_bl_refused ) &
+    RMON=$!
+    n=0; i=0
+    while [ $i -lt 600 ]; do
+        i=$((i + 1)); sleep 1
+        if [ "$(wc -l < /data/oneos_bl_refused 2>/dev/null)" -ge 3 ] 2>/dev/null; then n=15; refused=1; break; fi
+        [ "$(cat $BL/brightness 2>/dev/null)" = 0 ] || { n=0; continue; }
+        case "$(dumpsys power 2>/dev/null | sed -n 's/^ *mWakefulness=//p' | head -n 1)" in
+            Awake) ;;
+            *) n=0; continue ;;
+        esac
+        f=$(timeout 3 cmd display get-brightness 0 2>/dev/null | head -n 1)
+        light=$(echo "$f" | awk -v lo="${lo:-0}" -v hi="${hi:-1}" '{
+            for (i = 1; i <= NF; i++) if ($i ~ /^[0-9]*[.]?[0-9]+(E-?[0-9]+)?$/) {
+                print ($i + 0 > lo + 0.05 * (hi - lo)) ? 1 : 0; exit } }')
+        [ "$light" = 1 ] && n=$((n + 1)) || n=0
+        [ $n -ge 15 ] && break
+    done
+    kill $RMON 2>/dev/null
+    if [ $n -lt 15 ]; then
+        echo "$(date +%T) brightness bridge: the node moved on its own after $i s; leaving it to the lights HAL"
+        exit 0
+    fi
+    if [ "${refused:-0}" = 1 ]; then
+        echo "$(date +%T) brightness bridge: the lights HAL refuses the guest's brightness (3x Failed issuing setLightState after $i s); taking the node over"
+    else
+        echo "$(date +%T) brightness bridge: the lights HAL does not reach the panel (node 0, awake and asking for light for 15 s); taking the node over"
+    fi
 fi
 # A level scale when the range ends above 1 (ColorOS, OxygenOS); else 0..1.
 SCALE=$(echo "${lo:-x} ${hi:-x} ${nm:-x}" | awk '{ t = $3; if (t !~ /^[0-9.]+$/) t = $2
@@ -922,6 +1056,39 @@ fi
 /system/bin/vold --blkid_context=u:r:blkid:s0 --blkid_untrusted_context=u:r:blkid_untrusted:s0 --fsck_context=u:r:fsck:s0 --fsck_untrusted_context=u:r:fsck_untrusted:s0 $VOLD_EXTRA > /data/vold.log 2>&1 &
 VOLD_PID=$!
 echo "[Pivoted Root] Vold PID: $VOLD_PID"
+# Shared folders (held above): once the guest's vold has bound its /data/media
+# to /mnt/pass_through/0/emulated (the storage its MediaProvider serves apps
+# from; /mnt is shared in this namespace, so the binds there reach the app
+# namespaces as slaves), each held folder goes over the guest's own at both
+# places; the guest's files in those folders stay underneath, untouched.
+# Then a rescan of the volume so the gallery lists them. Log: /data/oneos_share.log.
+if [ -n "$SHARE_HELD" ]; then
+    (
+        PT=/mnt/pass_through/0/emulated
+        n=0
+        until awk -v m="$PT" '$5 == m {f = 1} END {exit !f}' /proc/self/mountinfo && [ -d "$PT/0" ]; do
+            n=$((n + 1)); [ $n -ge 300 ] && { echo "$(date +%T) the guest's storage ($PT) never came up; nothing shared"; exit 0; }
+            sleep 1
+        done
+        done_=""
+        for d in $SHARE_HELD; do
+            ok=1
+            for t in "$PT/0/$d" "/data/media/0/$d"; do
+                [ -L "$t" ] && { ok=0; break; }
+                mkdir -p "$t" && chown 1023:1023 "$t" 2>/dev/null
+                $BB mount --bind "$SHARE_HOLD/$d" "$t" || { ok=0; break; }
+            done
+            [ $ok = 1 ] && done_="$done_ $d"
+        done
+        echo "$(date +%T) shared from One UI after ${n}s:${done_:- none}"
+        $BB umount -l "$SHARE_HOLD" 2>/dev/null
+        n=0
+        while [ "$(getprop sys.boot_completed)" != 1 ] && [ $n -lt 600 ]; do sleep 2; n=$((n + 2)); done
+        sleep 20
+        /system/bin/content call --uri content://media --method scan_volume --arg external_primary >/dev/null 2>&1 &&
+            echo "$(date +%T) media rescan asked" || echo "$(date +%T) media rescan refused; the gallery lists them at its next scan"
+    ) </dev/null >> /data/oneos_share.log 2>&1 &
+fi
 n=0
 while [ $n -lt 50 ]; do
     [ "$(svc_pid $VOLD_NAME)" = "$VOLD_PID" ] && break
@@ -1010,9 +1177,59 @@ fi
 if [ -f /data/guest_audio.flag ]; then
     echo "[Pivoted Root] Starting guest audioserver..."
     mkdir -p /data/misc/audioserver && chown 1041:1005 /data/misc/audioserver && chmod 0700 /data/misc/audioserver
+    # A guest restart that keeps the previous generation's audio HAL leaves the
+    # new audioserver without a primary output: the HAL holds the old streams,
+    # openOutput for AUDIO_DEVICE_OUT_SPEAKER fails ("Cannot open output stream
+    # ... on hw module primary", "The policy configuration does not declare a
+    # primary output") and every createTrack gets error -19 for the rest of the
+    # session. Galaxy A15 Infinity-X: audioserver 8035 registered at 16:10:33,
+    # two minutes after the 16:10 soft reboot, and the sound stayed dead until
+    # the 14:25 full launch; the 03:33 and 04:05 sessions died the same way
+    # (sound_watch.log / sound_watch.prev). A full launch never sees this:
+    # oneos_switch.sh restarts the HAL services before us, so only a HAL whose
+    # pid survived the guest restart needs this. Restart it the way the full
+    # launch does, through the HAL's init services, and fall back to the
+    # pid when the property did not move it: init starts the service again,
+    # and the fresh HAL takes the new audioserver's streams. The recorded pid
+    # lives in the guest's /data like the other keeper logs; the pid file also
+    # guards against pid reuse restarting a fresh HAL, which would only cost
+    # another HAL restart, never a broken one.
+    hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+    hprev=$(cat /data/oneos_audio_hal.pid 2>/dev/null)
+    if [ -n "$hpid" ] && [ "$hpid" = "$hprev" ]; then
+        echo "[Pivoted Root] audio HAL survived the guest restart as pid $hpid; restarting it for a fresh primary output"
+        for hsv in $(getprop | sed -n 's/^\[init\.svc\.\(vendor\.audio-hal[^]]*\)\]: \[running\]$/\1/p' | tr '\n' ' '); do
+            setprop ctl.restart "$hsv"
+        done
+        n=0
+        while [ $n -lt 100 ]; do
+            sleep 0.2
+            hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+            if [ -n "$hpid" ] && [ "$hpid" != "$hprev" ]; then break; fi
+            n=$((n + 1))
+        done
+        if [ -n "$hpid" ] && [ "$hpid" = "$hprev" ]; then
+            echo "[Pivoted Root] audio HAL still pid $hpid after the ctl.restart; killing it"
+            kill -9 "$hpid" 2>/dev/null || true
+            n=0
+            while [ $n -lt 100 ]; do
+                sleep 0.2
+                hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+                if [ -n "$hpid" ] && [ "$hpid" != "$hprev" ]; then break; fi
+                n=$((n + 1))
+            done
+        fi
+        echo "[Pivoted Root] audio HAL pid after the restart: ${hpid:-none} (waited $((n / 5))s)"
+    fi
+    if [ -n "$hpid" ]; then echo "$hpid" > /data/oneos_audio_hal.pid; fi
     n=0
     while [ $n -lt 50 ] && ! service check android.hardware.audio.core.IModule/default 2>/dev/null | grep -q ": found"; do n=$((n + 1)); sleep 0.2; done
     echo "[Pivoted Root] audio HAL IModule/default:$(service check android.hardware.audio.core.IModule/default 2>/dev/null | cut -d: -f2) after $((n / 5))s"
+    # The record above ran while the full launch's own HAL restart (oneos_switch.sh)
+    # may not have registered the module yet; record the pid now that it is up, so
+    # the next guest restart can tell a surviving HAL from a fresh one.
+    hpid=$(dumpsys --pid android.hardware.audio.core.IModule/default 2>/dev/null | head -n 1 | tr -dc 0-9)
+    if [ -n "$hpid" ]; then echo "$hpid" > /data/oneos_audio_hal.pid; fi
     # A2DP offload (run 44): Samsung's QTI HAL turns its Bluetooth offload path
     # on only from the vendor parameter l_a2dp_format (bit 21 of the number,
     # Platform+8), which One UI's audioserver sends and a GSI's never does: every
@@ -1031,7 +1248,12 @@ if [ -f /data/guest_audio.flag ]; then
     # oneos_a2dp.log gets the HAL's line ("configured l_a2dp_format", or "not
     # configured ..." for a key it does not take). The log, like the keepers'
     # logs, grows across sessions: each session starts with a dated line.
+    # Qualcomm's HAL only (0.5.10): the parcel names qti.audio.core.VString, which
+    # Samsung's Exynos HAL refuses (Galaxy S26: status -3 three times a session,
+    # report cdd92328); its offload path needs no such key. MediaTek's refuses it
+    # as well (A16 4G ColorOS, report 33e2bc9b: -3, five sessions), so only QTI.
     A2F=${ONEOS_GUEST_A2DP_FORMAT:-2097152}
+    [ -n "${ONEOS_GUEST_A2DP_FORMAT:-}" ] || [ "$(getprop ro.soc.manufacturer)" = QTI ] || A2F=0
     case "$A2F" in ""|*[!0-9]*) A2F=0 ;; esac
     if [ "$A2F" != 0 ]; then
         echo "=== $(date '+%F %T') session: l_a2dp_format=$A2F to the audio HAL" >> /data/oneos_a2dp.log
@@ -1059,7 +1281,60 @@ if [ -f /data/guest_audio.flag ]; then
             done' oneos_a2dp "$A2F" "$BB" >> /data/oneos_a2dp.log 2>&1 &
         echo "[Pivoted Root] A2DP offload: l_a2dp_format=$A2F to the audio HAL, again on every HAL restart, each send checked in the HAL log (/data/oneos_a2dp.log)"
     else
-        echo "[Pivoted Root] A2DP offload: l_a2dp_format not sent (ONEOS_GUEST_A2DP_FORMAT=0)"
+        echo "[Pivoted Root] A2DP offload: l_a2dp_format not sent (${ONEOS_GUEST_A2DP_FORMAT:+ONEOS_GUEST_A2DP_FORMAT=$ONEOS_GUEST_A2DP_FORMAT}${ONEOS_GUEST_A2DP_FORMAT:-$(getprop ro.soc.manufacturer) is not a Qualcomm SoC})"
+    fi
+    # Bluetooth stream left disabled (0.5.11): Samsung's AIDL audio HAL with a
+    # "bluetooth" module (MediaTek Galaxy A, A16 4G ColorOS report 33e2bc9b)
+    # hands every A2DP output of a device the one Bluetooth port it made at
+    # connect (ModuleBluetooth fetchAndCheckProxy). The guest audio policy
+    # opens the output once to read its dynamic profiles, closes it and opens
+    # it again; the close stops that shared port (state DISABLED), and the
+    # real output then drops every write ("transfer: stream state is disabled",
+    # 10,134 lines in the session): earbuds connected, no sound. One UI's
+    # module config has no such probe. The HAL puts a disabled port back in
+    # standby when A2DP is re-enabled (IBluetoothA2dp.setEnabled(true), which
+    # libaudiohal sends for the standard key A2dpSuspended=false). So while
+    # the HAL logs that line outside a call, A2dpSuspended=false goes to the
+    # guest AudioFlinger (setParameters, transaction 18 as the call keeper);
+    # a call suspends A2DP on purpose (SCO), so never during one. Follows the
+    # HAL's own log tag only (no polling); at most once in 3 s, 5 tries a
+    # session without a recovery. Log /data/oneos_a2dp.log.
+    # Exynos (0.5.12): Samsung's Exynos HAL opens its A2DP offload stream
+    # (proxy_a2dp_open, A2DP_STATUS_STANDBY) only once A2dpSuspended=false came,
+    # which One UI's Bluetooth app sends at every connect and ColorOS's never
+    # does (AudioDeviceBroker "clearA2dpSuspended, internalOnly: true"): the
+    # earbuds connected, the policy routed music to them, and the HAL logged
+    # "A2dp routing was requested even though not ready" and kept the speaker
+    # (Galaxy S26 b025cad0 and cdd92328; One UI's order on the S24: 87a4d7f1).
+    # That line triggers the same key.
+    # ONEOS_GUEST_A2DP_NUDGE=0 leaves it out.
+    if [ "${ONEOS_GUEST_A2DP_NUDGE:-1}" = 1 ] &&
+       { service check android.hardware.audio.core.IModule/bluetooth 2>/dev/null | grep -q ": found" ||
+         [ "$(getprop ro.soc.manufacturer)" = Samsung ]; }; then
+        echo "=== $(date '+%F %T') session: Bluetooth stream watch (A2dpSuspended=false when the HAL drops A2DP writes)" >> /data/oneos_a2dp.log
+        $BB sh -c 'bb=$1; last=0; fails=0; sent=0
+            logcat -v brief -T 1 -s AHAL_StreamBluetooth:D AHAL_BluetoothAudioPort:I audio_hw_playback:W audio_hw_a2dp_proxy:I 2>/dev/null | while IFS= read -r l; do
+                case "$l" in
+                    *"stream state is disabled"*|*"A2dp routing was requested even though not ready"*) ;;
+                    *"standby"*"done"*|*"start"*"STARTED"*|*"proxy_a2dp_open"*)
+                        [ "$sent" = 1 ] && { echo "$(date +%T) Bluetooth stream back: ${l#*: }" | cut -c1-200; sent=0; fails=0; }
+                        continue ;;
+                    *) continue ;;
+                esac
+                now=$($bb date +%s)
+                [ $((now - last)) -ge 3 ] || continue
+                last=$now
+                cs=$(dumpsys telephony.registry 2>/dev/null | $bb grep -m1 -o "mCallState=[0-9]*" | $bb grep -o "[0-9]*$")
+                [ "${cs:-0}" = 0 ] || continue
+                if [ "$sent" = 1 ]; then
+                    fails=$((fails + 1))
+                    [ $fails -lt 5 ] || { echo "$(date +%T) Bluetooth stream still disabled after 5 tries: watch off for the session"; exit 0; }
+                fi
+                r=$({ /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "A2dpSuspended=false" || service call media.audio_flinger 18 i32 0 s16 "A2dpSuspended=false"; } 2>&1 | tr -s " \n" " " | head -c 80)
+                sent=1
+                echo "$(date +%T) HAL kept A2DP off (${l#*: }): A2dpSuspended=false to AudioFlinger: $r" | cut -c1-260
+            done' oneos_a2dp_watch "$BB" >> /data/oneos_a2dp.log 2>&1 &
+        echo "[Pivoted Root] A2DP: Bluetooth stream watch on (the HAL has a bluetooth module; /data/oneos_a2dp.log)"
     fi
     /system/bin/audioserver > /dev/null 2>&1 &
     AS_PID=$!
@@ -1083,8 +1358,21 @@ if [ -f /data/guest_audio.flag ]; then
         # So: 60 s as before, and never less than 20 s after the guest framework
         # is there (a = seconds since "activity" was first found); 600 s at most
         # while there is no framework at all (nothing needs sound until then).
-        t=0; a=-1
-        while [ "$(owner)" != "$as" ] && kill -0 $as 2>/dev/null; do
+        # 0.5.12: a guest audioserver that dies before it registers is started again,
+        # 3 times at most, before any hand-over. The audio HAL restarted 1 s after the
+        # guest one started (HIDL: "HAL server crashed, audio server is restarting",
+        # it exits by design), the old loop took that for a failure and handed over
+        # at 2 s, and Samsung audioserver killed the Pixel framework (Invalid usage
+        # 1005; S23 Ultra Pixel 2f5a8be9, "the other system stopped" at 60 s).
+        t=0; a=-1; d=0
+        while [ "$(owner)" != "$as" ]; do
+            if ! kill -0 $as 2>/dev/null; then
+                [ $d -lt 3 ] || break
+                d=$((d + 1)); sleep 2; t=$((t + 2))
+                /system/bin/audioserver > /dev/null 2>&1 & as=$!
+                echo "$(date +%T) guest audioserver died before it registered (${t}s); started again as $as ($d of 3)"
+                continue
+            fi
             if [ $a -lt 0 ]; then
                 case "$(service check activity 2>/dev/null)" in *": found"*) a=0 ;; esac
             fi
@@ -1093,11 +1381,24 @@ if [ -f /data/guest_audio.flag ]; then
             sleep 2; t=$((t + 2)); [ $a -lt 0 ] || a=$((a + 2))
         done
         if [ "$(owner)" != "$as" ]; then
-            if [ $a -lt 0 ]; then handover "guest audioserver did not register in ${t}s (no guest framework in that time)"
+            if [ $d -ge 3 ] && ! kill -0 $as 2>/dev/null; then handover "guest audioserver died 4 times before it registered (${t}s)"
+            elif [ $a -lt 0 ]; then handover "guest audioserver did not register in ${t}s (no guest framework in that time)"
             else handover "guest audioserver did not register in ${t}s (${a}s after the guest framework came up)"; fi
             exit 0
         fi
         echo "$(date +%T) guest audioserver $as registered after ${t}s"
+        # 0.5.13, Samsung SoC (Exynos): A2dpSuspended=false before any earbuds connect.
+        # Samsung s audio HAL opens its A2DP stream only at the connect, and only when A2DP
+        # is not suspended then; One UI s Bluetooth app clears it first, the guest never
+        # does. Sent at the hint of the HAL (0.5.12) it arrived after the connect and the
+        # stream stayed shut (S26 02e9ebd1: a2dp-suspend 0, still not ready). Again after
+        # each restart of this audioserver (a new HAL starts suspended).
+        unsusp() {
+            [ "$(getprop ro.soc.manufacturer)" = Samsung ] || return 0
+            r=$({ /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "A2dpSuspended=false" || service call media.audio_flinger 18 i32 0 s16 "A2dpSuspended=false"; } 2>&1 | tr -s " \n" " " | head -c 60)
+            echo "$(date +%T) A2dpSuspended=false to the HAL before Bluetooth connects (Samsung SoC): $r"
+        }
+        unsusp
         # Keep it the one servicemanager hands out (host init can bring
         # Samsung audioserver back through the HAL onrestart). Log why it
         # restarts. No apostrophes anywhere in this script: it is one
@@ -1132,8 +1433,22 @@ if [ -f /data/guest_audio.flag ]; then
                 sleep $d
                 now=$(date +%s); last=$now
             fi
+            # 0.5.07: the vendor audio HAL fresh first, as at the switch. The QTI AIDL
+            # HAL kept the dead audioserver streams open ("port config id 39 already
+            # has a stream opened on it"), so the new one got no output and the rest
+            # of the session had no sound at all (S25 Ultra Pixel a18ecab9; A34
+            # HyperOS c16c8f15: sound broke after a soft restart).
+            hs=$(getprop | sed -n "s/^\[init\.svc\.\(vendor\.audio-hal[^]]*\)\]: \[running\]\$/\1/p" | tr "\n" " ")
+            if [ -n "$hs" ]; then
+                for s in $hs; do setprop ctl.stop $s; done
+                sleep 1
+                for s in $hs; do setprop ctl.start $s; done
+                sleep 1
+                echo "$(date +%T) audio HAL services restarted for the new audioserver: $hs"
+            fi
             /system/bin/audioserver > /dev/null 2>&1 & as=$!; miss=0; r=$((r + 1))
             echo "$(date +%T) guest audioserver $why, restarted as $as"
+            ( n=0; while [ $n -lt 30 ] && [ "$(owner)" != "$as" ]; do sleep 2; n=$((n + 1)); done; unsusp ) &
         done' sh "$AS_PID" </dev/null >> /data/audio_keeper.log 2>&1 &
 fi
 
@@ -1194,10 +1509,23 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
     echo "=== $(date '+%F %T') session" >> /data/call_audio.log
     $BB sh -c 'bb=$1
         if [ "$2" != 2 ]; then
-            lib=""
-            for f in $(grep -l -s -F g_call_sim_slot /vendor/lib64/*audio*.so /vendor/lib64/hw/*audio*.so /vendor/bin/hw/*audio* 2>/dev/null); do
-                grep -q -s -F updateSecVSID "$f" && { lib=$f; break; }
-            done
+            # 0.5.07: the search reads every vendor audio library and took a whole
+            # core for about three minutes at each start (F8U, 11-14); its answer
+            # changes only with the vendor, so it is kept per vendor build.
+            fp=$(getprop ro.vendor.build.fingerprint); cache=/data/oneos_call_audio.cache
+            lib=""; cached=0
+            if [ -n "$fp" ] && [ -f "$cache" ] && [ "$(sed -n 1p "$cache")" = "$fp" ]; then
+                lib=$(sed -n 2p "$cache"); cached=1
+                [ -z "$lib" ] || [ -f "$lib" ] || { lib=""; cached=0; }
+            fi
+            if [ $cached = 0 ]; then
+                for f in $(grep -l -s -F g_call_sim_slot /vendor/lib64/*audio*.so /vendor/lib64/hw/*audio*.so /vendor/bin/hw/*audio* 2>/dev/null); do
+                    grep -q -s -F updateSecVSID "$f" && { lib=$f; break; }
+                done
+                [ -z "$fp" ] || printf "%s\n%s\n" "$fp" "$lib" > "$cache"
+            else
+                echo "$(date +%T) vendor audio library search: cached for this vendor build"
+            fi
             if [ -z "$lib" ]; then
                 echo "$(date +%T) no vendor audio library has g_call_sim_slot and updateSecVSID: SIM slot loop off"
                 exit 0
@@ -1239,7 +1567,7 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
                 vs=$((4 + $(s16 "$2"))); hs=$(($(s16 qti.audio.core.VString) + vs)); ps=$((4 + $(s16 g_call_sim_slot) + 12 + hs))
                 service call android.hardware.audio.core.IModule/default 34 i32 1 i32 1 i32 $ps s16 g_call_sim_slot i32 1 i32 1 i32 $hs s16 qti.audio.core.VString i32 $vs s16 "$2" i32 0 2>&1
             else
-                service call media.audio_flinger 18 i32 0 s16 "g_call_sim_slot=$2" 2>&1
+                { /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "g_call_sim_slot=$2" || service call media.audio_flinger 18 i32 0 s16 "g_call_sim_slot=$2"; } 2>&1
             fi | tr -s " \n" " " | head -c 100 | $bb sed "s/ *\$//"
         }
         # Delivered when the last "configured g_call_sim_slot" line of the
@@ -1327,6 +1655,97 @@ if [ -f /data/guest_audio.flag ] && [ "${ONEOS_GUEST_CALL_SIM:-1}" != 0 ]; then
             last=$off; echo "$off" > /data/oneos_call_slot
             if [ "${s#?}" = "$want" ]; then cur=$off; else cur=""; fi
         done' sh "$BB" "${ONEOS_GUEST_CALL_SIM:-1}" "${ONEOS_GUEST_CALL_SIM_VIA:-}" </dev/null >> /data/call_audio.log 2>&1 &
+fi
+
+# MediaTek Bluetooth audio HALs close the whole A2DP session when AudioFlinger
+# closes its short format-probe output.  The real output opens a few
+# milliseconds later, but its port is already DISABLED and every start fails
+# until Bluetooth is restarted.  This is visible as an active A2DP device
+# together with AHAL_BluetoothAudioPort's "state=DISABLED failure" — a
+# MediaTek-only log tag, so a Qualcomm or Exynos phone can never fire this
+# watchdog.  The Galaxy A15/A16 4G (Helio G99 / MT6789) are the
+# device-confirmed cases and the same HAL generation ships on the other
+# MediaTek Galaxy phones, so arm the whole MediaTek family and let the exact
+# signature below decide.  Match the family across the four SoC properties,
+# not ro.soc.model alone: builds leave it empty or suffix it (MT6789V/CD),
+# Samsung reports it uppercase while the platform and hardware names are
+# lowercase, and boards like the A25/A33 put universalNNNN/s5eNNNN on
+# ro.board.platform/ro.hardware instead.  Restart Bluetooth after that exact
+# first-boot failure and retry once if the replacement session is also
+# consumed by the probe.  Do not touch deliberate disconnects or a session
+# which started normally.  ONEOS_GUEST_BT_RECOVER=0 disables it.
+bt_soc="$(getprop ro.board.platform)$(getprop ro.hardware)$(getprop ro.soc.manufacturer)$(getprop ro.soc.model)"
+case "$bt_soc" in
+    *mt[0-9]*|*MT[0-9]*|*[Mm]edia[Tt]ek*) bt_mtk=1 ;;
+    *) bt_mtk= ;;
+esac
+if [ "$bt_mtk" = 1 ] && [ "${ONEOS_GUEST_BT_RECOVER:-1}" = 1 ]; then
+    cat > /data/oneos_bt_recover.sh <<'BTRECOVEREOF'
+#!/system/bin/sh
+LOG=/data/oneos_bt_recover.log
+start=$(date +%s)
+echo "=== $(date '+%F %T') MediaTek A2DP first-session recovery" >> "$LOG"
+i=0
+while [ $i -lt 300 ]; do
+    sleep 1
+    bad=$(logcat -d -v epoch -T "$start.000" -s 'AHAL_BluetoothAudioPort:*' '*:S' 2>/dev/null |
+        grep -F 'session_type=A2DP_SOFTWARE_ENCODING_DATAPATH' |
+        grep -F 'state=DISABLED failure' | tail -n 1)
+    if [ -n "$bad" ] && dumpsys bluetooth_manager 2>/dev/null | grep -q '<- ACTIVE'; then
+        echo "$(date +%T) active A2DP session disabled by the probe output" >> "$LOG"
+        attempt=1
+        while [ $attempt -le 2 ]; do
+            attempt_start=$(date +%s)
+            echo "$(date +%T) Bluetooth recovery attempt $attempt/2" >> "$LOG"
+            cmd bluetooth_manager disable >> "$LOG" 2>&1
+            # The stack boots slowly on some ROMs (HyperOS's wait-for-state timed
+            # out before it reached OFF or ON, and the earbuds' auto-reconnect
+            # then bound to the half-initialized stack, whose A2DP session never
+            # came up: Galaxy A15 HyperOS, sound dead after every recovery; a
+            # slow manual restart with long pauses brought it back). Poll each
+            # state over long timeouts and settle after ON, so the earbuds'
+            # auto-reconnect binds to a fully initialized stack.
+            btoff=1; n=0
+            while [ $n -lt 30 ]; do
+                sleep 1
+                if dumpsys bluetooth_manager 2>/dev/null | grep -q '^  State:  *OFF$'; then btoff=0; break; fi
+                n=$((n + 1))
+            done
+            echo "$(date +%T) stack OFF after ${n}s (reached $((1 - btoff)))" >> "$LOG"
+            cmd bluetooth_manager enable >> "$LOG" 2>&1
+            bton=1; n=0
+            while [ $n -lt 45 ]; do
+                sleep 1
+                if dumpsys bluetooth_manager 2>/dev/null | grep -q '^  State:  *ON$'; then bton=0; break; fi
+                n=$((n + 1))
+            done
+            sleep 8
+            echo "$(date +%T) stack ON after ${n}s (reached $((1 - bton))); settled 8s for the earbuds' auto-reconnect" >> "$LOG"
+            waited=0
+            while [ $waited -lt 25 ]; do
+                sleep 1
+                if logcat -d -v epoch -T "$attempt_start.000" -s 'AHAL_BluetoothAudioPort:*' '*:S' 2>/dev/null |
+                   grep -F 'session_type=A2DP_SOFTWARE_ENCODING_DATAPATH' | grep -q 'state=STARTED'; then
+                    echo "$(date +%T) replacement A2DP session STARTED on attempt $attempt (stack reached: OFF=$((1 - btoff)) ON=$((1 - bton)))" >> "$LOG"
+                    exit 0
+                fi
+                waited=$((waited + 1))
+            done
+            echo "$(date +%T) replacement A2DP session not STARTED after attempt $attempt (stack reached: OFF=$((1 - btoff)) ON=$((1 - bton)))" >> "$LOG"
+            attempt=$((attempt + 1))
+        done
+        echo "$(date +%T) A2DP recovery exhausted after 2 attempts" >> "$LOG"
+        exit 0
+    fi
+    i=$((i + 1))
+done
+echo "$(date +%T) no disabled active A2DP session in 300 s" >> "$LOG"
+BTRECOVEREOF
+    chmod 700 /data/oneos_bt_recover.sh
+    /system/bin/sh /data/oneos_bt_recover.sh < /dev/null > /dev/null 2>&1 &
+    echo "[Pivoted Root] MediaTek A2DP first-session recovery armed (/data/oneos_bt_recover.log)"
+else
+    rm -f /data/oneos_bt_recover.sh
 fi
 
 # ColorOS system daemons that its init would start on demand ("interface aidl"
@@ -1695,7 +2114,102 @@ fi
 # and every guest sleep arms the IC in use, panel lit or not, as on a vivo
 # image. On a fold a panel is off by its dpms alone, and the lid switch tells
 # which panel is in use after a fold made with the screen off.
+# Samsung's audio settings that One UI's sound service sends and no other system knows (0.5.21; A36
+# ColorOS 11-18: the speaker "70 % of One UI" with them, quieter and duller without): Samsung's Dolby
+# on with the Auto profile and its volume leveler (g_effect_dolby_*, as One UI sends them), and the
+# speaker amplifier's temperature every 10 s (g_hw_speaker_amp_temp_spk/_rcv; One UI sends 28-37 C
+# from the phone's temperature: without it the amplifier's protection never got a reading, sysfs
+# audio/amp ready -1). The battery temperature stands in for it. Only where the amplifier node
+# exists (a Samsung smart amp); ONEOS_GUEST_SAMSUNG_AUDIO=0 leaves it out. Log: /data/oneos_sec_audio.log.
+if [ "${ONEOS_GUEST_SAMSUNG_AUDIO:-1}" = 1 ] && [ -d /sys/devices/virtual/audio/amp ] && [ -f /data/oneos_edm_stub.dex ]; then
+    ONEOS_BB="$BB" $BB sh -c '
+        BB=$ONEOS_BB
+        log() { echo "$(date +%T) $*" >> /data/oneos_sec_audio.log; }
+        param() { /system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam "$1" 2>&1 | tail -n 1; }
+        i=0
+        while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
+        sleep 10
+        for kv in g_effect_dolby_enable=1 g_effect_dolby_profile=0 g_effect_dolby_volume_leveler=7; do log "$(param $kv)"; done
+        last=""
+        while :; do
+            t=$(cat /sys/class/power_supply/battery/temp 2>/dev/null)
+            case "$t" in ""|*[!0-9-]*) t=300 ;; esac
+            t=$((t / 10))
+            [ $t -ge 10 ] && [ $t -le 70 ] || t=30
+            if [ "$t" != "$last" ]; then
+                r1=$(param g_hw_speaker_amp_temp_spk=$t); param g_hw_speaker_amp_temp_rcv=$t >/dev/null
+                [ -n "$last" ] || log "amp temperature: $r1"
+                last=$t
+            fi
+            sleep 10
+        done
+    ' </dev/null >/dev/null 2>&1 &
+fi
+# Stereo speakers (0.5.33; S24 FE ColorOS 0.5.32, tester: "sound is not stereo"): on Galaxy phones whose second
+# speaker is the earpiece, One UI's own audioserver powers that speaker's amplifier for media
+# (libaudioflinger's AudioFlinger::DualSpkControl::setAmpPower -> the stream key
+# l_dual_speaker_amp_left_power_enable=true/false on the speaker output; it starts at false). A guest's
+# audioserver has no DualSpkControl, so the earpiece amplifier stayed off and media played from the bottom
+# speaker only (the output itself is 2-channel). Sent here to every guest output on the speaker once the
+# guest's audio is up, and again whenever the HAL opens a speaker output or someone turns the amplifier off;
+# never during a call (One UI's own rule takes the earpiece speaker out by the proximity sensor then). Only
+# where the vendor audio libraries know the key (the S24 FE's Exynos HAL does; the A36's does not).
+# ONEOS_GUEST_DUAL_SPK=0 leaves it out. Log: /data/oneos_sec_audio.log.
+if [ "${ONEOS_GUEST_DUAL_SPK:-1}" = 1 ] && [ -f /data/oneos_edm_stub.dex ]; then
+    ONEOS_BB="$BB" $BB sh -c '
+        BB=$ONEOS_BB
+        log() { echo "$(date +%T) stereo: $*" >> /data/oneos_sec_audio.log; }
+        K=l_dual_speaker_amp_left_power_enable
+        lib=$($BB grep -l -s "$K" /vendor/lib64/hw/*.so /vendor/lib64/*.so 2>/dev/null | head -n 1)
+        [ -n "$lib" ] || { log "the vendor audio libraries have no $K: not needed"; exit 0; }
+        i=0
+        while [ "$(getprop service.bootanim.exit)" != 1 ] && [ $i -lt 600 ]; do sleep 1; i=$((i + 1)); done
+        send() {
+            cs=$(dumpsys telephony.registry 2>/dev/null | $BB grep -m1 -o "mCallState=[0-9]*" | $BB grep -o "[0-9]*$")
+            [ "${cs:-0}" = 0 ] || { log "$1: in a call, left alone"; return 0; }
+            ios=$(dumpsys media.audio_flinger 2>/dev/null | $BB awk "
+                /^Output thread / { io = \"\"; if (match(\$0, /name AudioOut_[0-9A-Fa-f]+/)) io = substr(\$0, RSTART + 14, RLENGTH - 14); next }
+                /^ *Output devices:/ && io != \"\" { if (\$0 ~ /SPEAKER/) print io; io = \"\" }" | while read -r h; do echo $((0x$h)); done | $BB sort -un | $BB head -n 16 | $BB tr "\n" "," )
+            ios=${ios%,}
+            [ -n "$ios" ] || { log "$1: no speaker output yet"; return 1; }
+            r=$(/system/bin/sh /data/oneos_genv.sh /system/bin/env CLASSPATH=/data/oneos_edm_stub.dex /system/bin/app_process /system/bin OneOSAudioParam --io "$ios" "$K=true" 2>&1 | tail -n 1)
+            log "$(echo "$1: $r" | cut -c1-280)"
+        }
+        log "earpiece speaker amplifier key in ${lib##*/}"
+        n=0
+        i=0
+        until send start; do sleep 3; i=$((i + 1)); [ $i -lt 40 ] || break; done
+        last=0
+        # 0.5.34: also at every start of playback on the speaker. DualSpkControl in One UI sends the key to every
+        # speaker output each time sound starts (true) and stops (false) (S24 FE report 8d036182, One UI at
+        # 16:52:10 and 16:52:21); sent once at the start, stereo came and went with the state the HAL kept
+        # (tester: "sometimes stereo works"). The HAL logs the speaker route as the stream starts.
+        logcat -v brief -T 1 -s audio_hw_primary:D audio_hw_playback:D audio_hw_route:I sec_audio_hw:V AHAL:D 2>/dev/null | while IFS= read -r l; do
+            pause=1
+            case "$l" in
+                *"$K=false"*) why="amplifier turned off" ;;
+                *open_output_stream*"devices(0x2)"*) why="speaker output opened" ;;
+                *"routes to device(speaker"*) why="playback on the speaker"; pause=0 ;;
+                *) continue ;;
+            esac
+            now=$($BB date +%s)
+            [ $((now - last)) -ge 2 ] || continue
+            last=$now
+            [ $pause = 0 ] || sleep 1
+            if [ "$why" = "playback on the speaker" ]; then send "$why" >/dev/null; n=$((n + 1)); [ $((n % 50)) = 1 ] && log "playback on the speaker: sent $n times so far"; else send "$why"; fi
+        done
+    ' </dev/null >/dev/null 2>&1 &
+fi
 DT2W=${ONEOS_GUEST_DT2W:-1}
+# 0.5.32: not in a One UI image. Its own input service (SemInputDeviceManagerService) already writes the panel's
+# display state through Samsung's sysinput HAL, as One UI does (S24+ One UI 9.5 report 34d6923c: enabled@1,0 and
+# @1,1 from the guest at every screen off), so the keeper was a second writer to the same node: Galaxy A17 5G
+# report cea77895, kernel panic "list_add corruption" in sec_input_enable_device from the keeper's busybox write,
+# 17 min into a One UI 9.5 session. ONEOS_GUEST_DT2W=1 still forces it.
+if [ "${ONEOS_GUEST_DT2W:-}" != 1 ] && grep -q '^ro.build.version.oneui=' /system/build.prop 2>/dev/null; then
+    DT2W=0
+    echo "$(date +%T) not started: a One UI image wakes on double tap itself (its input service drives the touch IC)" >> /data/dt2w.log
+fi
 if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/sec/tsp/enabled ] || [ -w /sys/class/sec/tsp1/enabled ]; }; then
     rm -f /data/oneos_dt2w_armed.* /data/oneos_dt2w_*.fifo /data/oneos_dt2w_aod* /data/oneos_dt2w_lid*
     ONEOS_BB="$BB" $BB sh -c '
@@ -1726,6 +2240,15 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             # IC in low-power mode, and at that time did not switch it back on.
             e0=$(cat $T/enabled 2>/dev/null)
             case "$e0" in 0|1) eon=1 ;; 2) eon=2 ;; *) log "$t ($ev): enabled reads ${e0:-nothing}, not a known protocol: double tap left to the guest"; continue ;; esac
+            power=1
+            # S23 STM requires both enum and input readback to confirm a transition.
+            if [ "$(getprop ro.product.vendor.model)" = SM-S918B ] &&
+               [ "$(readlink -f $I/device/driver)" = /sys/bus/spi/drivers/stm_ts_spi ]; then
+                case "$e0:$(cat $I/enabled 2>/dev/null)" in
+                    1:0|2:1) power=2; eon=2 ;;
+                    *) log "$t: unmeasured STM power state; double tap left to the guest"; continue ;;
+                esac
+            fi
             # KEY_WAKEUP (143) among its keys: bit 15 of the third word from the end.
             set -- $(cat $I/capabilities/key 2>/dev/null)
             w=""; [ $# -ge 3 ] && eval w=\${$(($# - 2))}
@@ -1736,7 +2259,7 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                 *) C=/sys/class/drm/card0-DSI-1/dpms; B=/sys/class/backlight/panel0-backlight; [ -e $B/brightness ] || B=/sys/class/backlight/panel ;;
             esac
             [ -r $B/brightness ] || { log "$t ($ev): no backlight to follow ($B)"; continue; }
-            eval "EV_$t=$ev C_$t=$C B_$t=$B/brightness ON_$t=1 L_$t=1 GP_$t= EON_$t=$eon"
+            eval "EV_$t=$ev C_$t=$C B_$t=$B/brightness ON_$t=1 L_$t=1 GP_$t= EON_$t=$eon POWER_$t=$power WR_$t=0"
             IDS="$IDS $t"
             log "$t: $ev ($(cat $I/name 2>/dev/null)), panel $C=$(cat $C 2>/dev/null), $B=$(cat $B/brightness 2>/dev/null), enabled=$(cat $T/enabled 2>/dev/null)"
         done
@@ -1857,6 +2380,21 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             [ "$e" = 2 ] && eval EON_$1=2
             eval eon=\$EON_$1
         }
+        power_tsp() {
+            T=/sys/class/sec/$1
+            eval p=\$POWER_$1
+            if [ "$p" = 2 ]; then
+                # Only 1,0 and 2,1 act on this STM driver.
+                case "$2" in
+                    1) echo 1,0 > $T/enabled || return 1 ;;
+                    2) echo 2,1 > $T/enabled || return 1 ;;
+                    *) return 1 ;;
+                esac
+                [ "$(cat $T/enabled)" = "$2" ] && [ "$(cat $T/input/enabled)" = "$(( $2 - 1 ))" ]
+            else
+                case "$2" in 1) tsp_off $T ;; 2) tsp_on $T ;; *) return 1 ;; esac
+            fi
+        }
         arm() {
             eval g=\$GP_$1 no=\$NO_$1
             [ -z "$g" ] && [ -z "$no" ] || return 0
@@ -1875,8 +2413,12 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                   fi
                   if in_call; then log "$1: double tap during a call: ignored"; continue; fi
                   log "$1: double tap: waking the guest"
-                  timeout 5 cmd input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || log "$1: cmd input keyevent failed"
+                  # Let the panel-on loop restore touch even while input waits for dispatch.
                   setaod 0
+                  timeout 5 cmd input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || log "$1: cmd input keyevent failed"
+                  # 0.5.15: a click, as One UI gives for its double tap (owner: "there should be haptic
+                  # feedback for dt2w"). EFFECT_CLICK through the guest vibrator service; -f: also on silent.
+                  timeout 3 cmd vibrator_manager synced -f -d oneos_dt2w prebaked 0 >/dev/null 2>&1 &
               done < $P ) &
             # 1,0 only counts once getevent holds the touchscreen: the driver closes only
             # a device somebody has open, and the guest lets go of it when its panel goes
@@ -1892,16 +2434,21 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
             [ $i -lt 20 ] || log "$1: getevent has not opened $ev after 1 s"
             # The marker first: only a marked IC is ever put back on (here, by wake_tsp
             # and by the return).
-            : > /data/oneos_dt2w_armed.$1
-            if tsp_off $T; then
+            eval p=\$POWER_$1
+            echo "$p" > /data/oneos_dt2w_armed.$1
+            if power_tsp $1 1; then
                 tsp_read $1
                 log "$1: $2: low-power mode (enabled=$e)"
             else
                 log "$1: panel off, but $T/enabled refused 1,0: back on, double tap left to the guest"
-                tsp_on $T
+                restored=0; power_tsp $1 2 && restored=1
                 tsp_read $1
-                [ "$e" = "$eon" ] && rm -f /data/oneos_dt2w_armed.$1
-                disarm $1
+                if [ "$restored:$e" = "1:$eon" ]; then
+                    rm -f /data/oneos_dt2w_armed.$1
+                    disarm $1
+                elif [ "$p" != 2 ]; then
+                    disarm $1
+                fi
                 eval NO_$1=1
             fi
         }
@@ -1913,11 +2460,22 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
         }
         wake_tsp() {
             T=/sys/class/sec/$1
-            [ -f /data/oneos_dt2w_armed.$1 ] || { disarm $1; return; }
-            tsp_on $T
+            [ -f /data/oneos_dt2w_armed.$1 ] || { eval WR_$1=0; disarm $1; return; }
+            restored=0; power_tsp $1 2 && restored=1
             tsp_read $1
-            [ "$e" = "$eon" ] || { sleep 0.2; tsp_on $T; tsp_read $1; }
-            rm -f /data/oneos_dt2w_armed.$1
+            if [ "$restored:$e" != "1:$eon" ]; then
+                sleep 0.2; restored=0; power_tsp $1 2 && restored=1; tsp_read $1
+            fi
+            if [ "$restored:$e" = "1:$eon" ]; then
+                rm -f /data/oneos_dt2w_armed.$1
+                eval WR_$1=0
+            else
+                eval p=\$POWER_$1
+                if [ "$p" = 2 ]; then
+                    log "$1: $2: restore not confirmed (enabled=$e), keeping reader and recovery marker"
+                    return
+                fi
+            fi
             disarm $1
             log "$1: $2: enabled=$e"
         }
@@ -1963,7 +2521,16 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                 s=$l; [ $D = 1 ] && s=0
                 eval o=\$ON_$t ol=\$L_$t
                 [ $l = $ol ] || { eval L_$t=$l; LC=1; }
-                [ $s = $o ] && continue
+                if [ $s = $o ]; then
+                    eval retry=\$WR_$t
+                    [ $s = 1 ] && [ "${retry:-0}" -gt 0 ] || continue
+                    retry=$((retry - 1)); eval WR_$t=$retry
+                    [ $((retry % 10)) = 0 ] || continue
+                else
+                    eval WR_$t=0 p=\$POWER_$t
+                    # Five paced retries while the S23 panel stays on after a failed restore.
+                    [ "$s:$p" != 1:2 ] || eval WR_$t=50
+                fi
                 eval ON_$t=$s
                 CH="$CH $t"
             done
@@ -2011,6 +2578,27 @@ if [ "$DT2W" = 1 ] && command -v getevent >/dev/null 2>&1 && { [ -w /sys/class/s
                     eval l=\$L_$t
                     if [ $l = 1 ]; then w="AOD (guest asleep, panel lit)"; else w="panel off"; fi
                     [ $a = 1 ] && arm_fresh $t "$w"
+                done
+            fi
+            # 0.5.13: a touch IC found off under a lit panel while the guest is awake is
+            # switched on again. Only the fold layout had this (oneos_switch.sh inner_tsp_on);
+            # on a bar phone an IC something else powered down stayed off for the whole
+            # session (S24+ LineageOS a3516486: "touch worked for a sec and stopped",
+            # enabled 0 under a lit panel at the keeper start, never written again).
+            # Not while armed (the keeper itself put it in low-power mode); checked about
+            # every 2 s, and logged once per off spell.
+            HC=$(( ${HC:-0} + 1 ))
+            if [ $HC -ge 8 ]; then
+                HC=0
+                for t in $IDS; do
+                    eval s=\$ON_$t
+                    [ "$s" = 1 ] && [ ! -f /data/oneos_dt2w_armed.$t ] || continue
+                    [ "$(cat /sys/class/sec/$t/enabled 2>/dev/null)" = 0 ] || { eval HO_$t=; continue; }
+                    tsp_on /sys/class/sec/$t
+                    tsp_read $t
+                    eval ho=\$HO_$t
+                    [ -n "$ho" ] || log "$t: touch IC off under a lit panel, guest awake: switched on (enabled=$e)"
+                    eval HO_$t=1
                 done
             fi
             # vivo AOD brightness (F8U run 13, OriginOS: AOD "very weak, unseeable"). The
@@ -2478,6 +3066,24 @@ fi
 echo $$ > "$BRING/.pid"
 [ "$MODE" = early ] && rm -f "$GO"
 
+# Removed in OneOS on One UI (0.5.07, root verb bring-forget): its copy is gone and
+# its name is in .forget; the app goes from this system too. An app brought again
+# since (a copy waits) stays. The list is done once, then removed.
+if [ -s "$BRING/.forget" ] && [ ! -L "$BRING/.forget" ]; then
+    if wait_pm; then
+        while read -r fp; do
+            is_package "$fp" || continue
+            [ -d "$BRING/$fp" ] && continue
+            gpm root 20 path "$fp" >/dev/null 2>&1 || continue
+            out=$(gpm root 60 uninstall "$fp" 2>&1)
+            log "$fp: removed (taken off the list in OneOS on One UI): $(short "$out")"
+        done < "$BRING/.forget"
+        rm -f "$BRING/.forget"
+    else
+        log "the package manager did not answer; removed apps go at the next start"
+    fi
+fi
+
 # What waits: a finished copy that is not applied yet.
 pending=""; count=0
 for d in "$BRING"/*; do
@@ -2556,6 +3162,32 @@ BRINGEOF
 else
     rm -f /data/oneos_bring_restore.sh
 fi
+# servicemanager diagnostics (0.5.09): on the Galaxy A34 SM-A346B with One UI 9
+# every system dies because One UI's servicemanager answers the guest's add and
+# find with "SELinux denied for service" (system_server's addService; gvld
+# "didn't start" for StorageManagerService) while getenforce says Permissive and
+# no avc line is logged (0.5.04+ reports 5d899189, ba9db9f5, 4a805de5). What the
+# kernel and servicemanager see, now and once the guest framework runs, into
+# /data/oneos_sm_diag.log (collected with the guest's other logs). Read only.
+sm_diag() {
+    {
+        echo "== $1 $(date +%T)"
+        sm=$(pidof servicemanager 2>/dev/null | cut -d' ' -f1)
+        echo "enforce=$(cat /sys/fs/selinux/enforce 2>/dev/null) getenforce=$(getenforce 2>/dev/null) deny_unknown=$(cat /sys/fs/selinux/deny_unknown 2>/dev/null) reject_unknown=$(cat /sys/fs/selinux/reject_unknown 2>/dev/null)"
+        echo "servicemanager pid=$sm ctx=$(cat /proc/$sm/attr/current 2>/dev/null | tr -d '\0') exe=$(ls -l /proc/$sm/exe 2>/dev/null | sed 's/.*-> //')"
+        echo "this shell ctx=$(cat /proc/self/attr/current 2>/dev/null | tr -d '\0') uid=$(id -u)"
+        for n in gvld vold android.system.vold.IVold/default activity package; do
+            echo "service check $n: $(service check "$n" 2>&1 | head -n 1)"
+        done
+        z=$(pidof zygote64 2>/dev/null | cut -d' ' -f1); ss=$(pidof system_server 2>/dev/null | cut -d' ' -f1)
+        [ -n "$z" ] && echo "zygote64 $z ctx=$(cat /proc/$z/attr/current 2>/dev/null | tr -d '\0')"
+        [ -n "$ss" ] && echo "system_server $ss ctx=$(cat /proc/$ss/attr/current 2>/dev/null | tr -d '\0')"
+        echo "-- kernel: servicemanager, avc and SELinux lines (last 40)"
+        dmesg 2>/dev/null | grep -iE 'servicemanager|avc:|selinux|security_compute|context' | tail -n 40 | cut -c1-300
+    } >> /data/oneos_sm_diag.log 2>&1
+}
+sm_diag "before zygote"
+( sleep 45; sm_diag "45 s after zygote" ) &
 echo "[Pivoted Root] Launching guest Zygote & SystemServer via zygote_exec..."
 if [ -f /data/oneos_root/enabled ]; then
     /system/bin/sh /data/oneos_runtime.sh pre || exit 3

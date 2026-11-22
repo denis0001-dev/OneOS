@@ -31,7 +31,8 @@ import com.fahadali.oneos.core.model.PackageSets
  * name the profile, the image and its file set (root refuses a set that is not
  * that image's on that phone); `launch` carries this launch's
  * `ONEOS_GUEST_HIDE_GMS`, `ONEOS_HEAT_CAP`, `ONEOS_GUEST_SEC_IMS` and (0.4.32)
- * `ONEOS_GUEST_EDM_STUB` (0 or 1 each).
+ * `ONEOS_GUEST_EDM_STUB`, then optionally `ONEOS_VERBOSE_BOOT`, `ONEOS_FULL_LOGS` and
+ * (0.5.20) `ONEOS_SHARE_FILES` (0 or 1 each; default 0, 1 and 0).
  */
 object RootScript {
     const val ASSET = "root/oneos_root.sh"
@@ -97,6 +98,21 @@ object RootScript {
         REMOVE("remove", Stdin.SCRIPT),
 
         /**
+         * One system only (0.5.09, the system card's menu): deletes the system set up now with its apps and
+         * data; old copies, logs and downloaded files stay. The stage is left with only its root script.
+         */
+        REMOVE_SYSTEM("remove-system", Stdin.NONE),
+
+        /** Start fresh (0.5.09): deletes only the apps, accounts and settings of the system set up now. */
+        RESET_DATA("reset-data", Stdin.NONE),
+
+        /**
+         * An app's kernel tool (0.5.10): `off <pkg>` disables an app whose libtimer.so runs now (recorded in the
+         * stage first), `on <pkg>` enables one that record names, `list` prints the record.
+         */
+        TOOL_APP("tool-app", Stdin.NONE),
+
+        /**
          * Installs the app's own update (0.4.41): the APK the app downloaded into
          * `files/oneos-update/OneOS.apk`, with its size, SHA-256 and versionCode.
          * Like begin and remove it may install the script first, so an update
@@ -122,6 +138,37 @@ object RootScript {
          * UI's app or its data is newer than the copy.
          */
         BRING_STATUS("bring-status", Stdin.NONE),
+
+        /**
+         * Remove one brought app (idle stage only): its copy goes and the package is
+         * recorded in `$STAGE/data/oneos_bring/.forget`, which the guest's start reads
+         * to uninstall it there. One UI's app and data are not touched.
+         */
+        BRING_FORGET("bring-forget", Stdin.NONE),
+
+        /**
+         * The apps One UI offers to bring, for the guest's own "Bring apps" screen
+         * (idle stage only): stdin is the catalog text (BringCatalog), one
+         * `<pkg> TAB <label> TAB <base64 PNG icon>` line per app, written as
+         * `$STAGE/data/oneos_bring_catalog/catalog.tsv` (read in the guest at
+         * `/data/oneos_bring_catalog/catalog.tsv`).
+         */
+        BRING_CATALOG("bring-catalog", Stdin.DATA),
+
+        /**
+         * One app of the catalog brought while a session of this system is running (the
+         * guest asked for it): the same copy as bring-collect makes for one package.
+         * Refused when no session is running.
+         */
+        BRING_ADD("bring-add", Stdin.NONE),
+
+        /**
+         * Debloater (0.5.32): the apps to hide in the system set up now (its Debloat screen). stdin is
+         * `<package> TAB <folder>` per line ([com.fahadali.oneos.core.model.Debloat.listText]), written as
+         * `$STAGE/debloat.list` for guest_prepare.sh to hide at the next start; empty removes it (Restore all).
+         * Refused while a session runs; the image is never changed.
+         */
+        DEBLOAT("debloat", Stdin.DATA),
     }
 
     /**
@@ -138,9 +185,8 @@ object RootScript {
     /** Session scripts from switcher/assets and the expected installd table, staged with every set. */
     val SCRIPTS: List<String> = listOf(
         "guest_runtime.sh", "guest_root", "guest_zygiskd", "guest_zygisk_ptrace", "guest_zygisk.so", "guest_vector.bundle", "guest_manager.apk",
-        "oneos_switch.sh", "boot_status.sh", "OneOSBootStatus.dex", "oneos_boot_icon.png", "guest_prepare.sh", "guest_start.sh", "guest_props.sh", "return_to_oneui.sh", "libsec-ril-patch.sh", "oneos_guest_secims.sh",
-        "check_host_apex.sh", "bridges.sh", "fold8_coloros.sh", "OneOSFold8Geometry.dex", "fold8_pixel.sh", "guest_google.sh", "zygote_exec", "OneOSEdmStub.dex", "oneos_btaudio", "OneOSOverlayDimen.dex", "host_installd.txt",
-        "apply-host-cutout-overlays.sh", "repair-guest-session.sh", "reload-guest-keyguard.sh", "reload-guest-blur.sh", "host_ksu_grants.sh", "reload-guest-ksud.sh", "live-guest-blur-ksud.sh", "host_ksu_grants.sh", "guest_ksud_mount_namespace.py",
+        "oneos_switch.sh", "boot_status.sh", "OneOSBootStatus.dex", "oneos_boot_icon.png", "guest_prepare.sh", "guest_start.sh", "guest_props.sh", "return_to_oneui.sh", "libsec-ril-patch.sh",
+        "check_host_apex.sh", "bridges.sh", "fold8_coloros.sh", "OneOSFold8Geometry.dex", "fold8_pixel.sh", "guest_google.sh", "zygote_exec", "OneOSEdmStub.dex", "oneos_btaudio", "oneos_essential_key", "OneOSOverlayDimen.dex", "host_installd.txt",
     )
 
     const val RAW_NAME = "system.raw"
@@ -150,6 +196,7 @@ object RootScript {
 
     private val TOKEN = Regex("^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
     private val ID = Regex("^[a-z0-9][a-z0-9-]{0,31}$")
+    private val PACKAGE = Regex("^[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z][A-Za-z0-9_]*)+$")
     private val DEC = Regex("^[0-9]{1,18}$")
     private val HEX64 = Regex("^[0-9a-f]{64}$")
     private val HEX16 = Regex("^[0-9a-f]{16}$")
@@ -213,7 +260,7 @@ object RootScript {
                 arg(3, DEC, "a versionCode")
             }
             Verb.LAUNCH -> {
-                if (args.size !in 7..8) need(8)
+                if (args.size !in 7..10) need(10)
                 args.getOrNull(0)?.let { if (it != "session" && it != "dry") p += "launch: mode '$it'" }
                 arg(1, DEC, "a versionCode")
                 arg(2, HEX16, "a session id")
@@ -222,17 +269,31 @@ object RootScript {
                 args.getOrNull(5)?.let { if (it != "0" && it != "1") p += "launch: Samsung IMS '$it' is not 0 or 1" }
                 args.getOrNull(6)?.let { if (it != "0" && it != "1") p += "launch: Knox edm stub '$it' is not 0 or 1" }
                 args.getOrNull(7)?.let { if (it != "0" && it != "1") p += "launch: verbose boot is not 0 or 1" }
+                args.getOrNull(8)?.let { if (it != "0" && it != "1") p += "launch: full session logs is not 0 or 1" }
+                args.getOrNull(9)?.let { if (it != "0" && it != "1") p += "launch: share my files is not 0 or 1" }
             }
-            Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
-            Verb.BRING_COLLECT -> {
+            Verb.RECOVER, Verb.OLD_LIST, Verb.REMOVE, Verb.REMOVE_SYSTEM, Verb.RESET_DATA, Verb.BRING_CLEAR, Verb.BRING_STATUS -> need(0)
+            Verb.BRING_COLLECT, Verb.BRING_CATALOG, Verb.DEBLOAT -> {
                 need(1)
                 arg(0, DEC, "a size")
+            }
+            Verb.BRING_FORGET, Verb.BRING_ADD -> {
+                need(1)
+                arg(0, PACKAGE, "a package name")
             }
             Verb.SELFUPDATE -> {
                 need(3)
                 arg(0, DEC, "a size")
                 arg(1, HEX64, "a SHA-256")
                 arg(2, DEC, "a versionCode")
+            }
+            Verb.TOOL_APP -> when (args.getOrNull(0)) {
+                "list" -> need(1)
+                "off", "on" -> {
+                    need(2)
+                    args.getOrNull(1)?.let { if (!Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+").matches(it)) p += "tool-app: '${it.take(60)}' is not a package" }
+                }
+                else -> p += "tool-app: mode '${args.getOrNull(0)?.take(20)}'"
             }
             Verb.PURGE -> {
                 need(1)

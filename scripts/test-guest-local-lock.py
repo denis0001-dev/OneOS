@@ -8,7 +8,7 @@ guest's own in front of that guard: a PIN, pattern or password whose record live
 the phone's gatekeeper, weaver or keystore.
 
 Here:
-- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the nine changes,
+- the patcher on a small smali tree with the shapes of the ColorOS 17 framework: the seven changes,
   the guard in both of its forms (as guest_no_gatekeeper.py writes it and as a decoded built jar
   shows it), a framework of another shape left untouched, a second run, a half-patched tree;
 - the helper class on the JVM through a small driver: set, check, change, remove, the waits after
@@ -95,10 +95,19 @@ TYPE_BODIES = {
 
     :cond_0
     return v0''',
+    'parameter_result': f'''    .locals 0
+
+    invoke-virtual {{p0}}, {LSS}->checkHavePermission()V
+
+    invoke-virtual {{p0, p1}}, {LSS}->getCredentialTypeInternal(I)I
+
+    move-result p0
+
+    return p0''',
 }
 
 
-def lss_text(guard='decoded', type_body='plain', helpers='private'):
+def lss_text(guard='decoded', type_body='plain', helpers='private', verify_locals=14):
     return f'''.class public {LSS}
 .super {W}ILockSettings$Stub;
 .source "LockSettingsService.java"
@@ -110,7 +119,7 @@ def lss_text(guard='decoded', type_body='plain', helpers='private'):
 
 # direct methods
 .method private doVerifyCredential({CRED}I{CB}I){VCR}
-    .locals 14
+    .locals {verify_locals}
     .param p1, "credential"    # {CRED}
     .param p2, "userId"    # I
     .param p3, "progressCallback"    # {CB}
@@ -187,50 +196,18 @@ def lss_text(guard='decoded', type_body='plain', helpers='private'):
 {TYPE_BODIES[type_body]}
 .end method
 
-.method public getPinLength(I)I
-    .locals 1
-
-    invoke-direct {{p0}}, {LSS}->checkHavePermission()V
-
-    const/4 p0, -0x1
-
-    return p0
-.end method
-
-.method public getUserPasswordMetrics(I)Landroid/app/admin/PasswordMetrics;
+.method public verifyGatekeeperPasswordHandle(JJI){VCR}
     .locals 3
+    .param p1, "gatekeeperPasswordHandle"    # J
+    .param p3, "challenge"    # J
+    .param p5, "userId"    # I
 
-    invoke-direct {{p0, p1}}, {LSS}->isUserSecure(I)Z
+    .line 2096
+    invoke-direct {{p0}}, {LSS}->checkReadPermission()V
 
-    move-result v0
+    sget-object v0, {VCR}->OTHER_ERROR:{VCR}
 
-  const/4 p0, 0x0
-
-    return-object p0
-.end method
-
-.method public getBoolean(Ljava/lang/String;ZI)Z
-    .locals 0
-
-    invoke-direct {{p0, p1, p3}}, {LSS}->checkDatabaseReadPermission(Ljava/lang/String;I)V
-
-    const/4 p0, 0x0
-
-    return p0
-.end method
-
-.method private checkDatabaseReadPermission(Ljava/lang/String;I)V
-    .locals 0
-
-    return-void
-.end method
-
-.method private isUserSecure(I)Z
-    .locals 1
-
-    const/4 v0, 0x0
-
-    return v0
+    return-object v0
 .end method
 
 .method public requireStrongAuth(II)V
@@ -403,6 +380,17 @@ class PatcherTest(unittest.TestCase):
             f'invoke-virtual {{p1}}, {CRED}->isNone()Z',
         ])
 
+    def test_a_zero_local_verify_wrapper_gets_one_safe_register(self):
+        self.patched(lss=lss_text(verify_locals=0))
+        text = self.read(LSS_FILE)
+        method = text.split(f'.method private doVerifyCredential({CRED}', 1)[1]
+        method = method.split('.end method', 1)[0]
+        self.assertTrue(method.startswith(f'I{CB}I){VCR}\n    .locals 1\n'))
+        self.assertIn(
+            f'invoke-direct/range {{p0 .. p3}}, {LSS}->oneosGuestLockVerify',
+            method,
+        )
+
     def test_the_credential_type_comes_from_the_guest_lock_and_survives_a_missing_helper(self):
         self.patched()
         text = self.read(LSS_FILE)
@@ -425,56 +413,13 @@ class PatcherTest(unittest.TestCase):
             'goto :oneos_gl_type_done',
         ])
 
-    def test_guest_pin_metrics_are_answered_before_is_user_secure(self):
-        self.patched()
+    def test_the_credential_type_may_reuse_p0_as_in_infinity_x(self):
+        self.patched(lss=lss_text(type_body='parameter_result'))
         text = self.read(LSS_FILE)
-        got = body(text, ' getUserPasswordMetrics(I)Landroid/app/admin/PasswordMetrics;')
-        self.assertEqual(got[:11], [
-            ':oneos_gl_metrics_start',
-            f'invoke-static {{p1}}, {HELPER}->pinLengthForUser(I)I',
-            'move-result v0',
-            'if-ltz v0, :oneos_gl_metrics_done',
-            'new-instance v1, Landroid/app/admin/PasswordMetrics;',
-            'const/4 v2, 0x3',
-            'invoke-direct {v1, v2}, Landroid/app/admin/PasswordMetrics;-><init>(I)V',
-            'iput v0, v1, Landroid/app/admin/PasswordMetrics;->length:I',
-            'return-object v1',
-            ':oneos_gl_metrics_end',
-            ':oneos_gl_metrics_catch',
-        ])
-        self.assertIn('.catch Ljava/lang/Throwable; {:oneos_gl_metrics_start .. :oneos_gl_metrics_end}'
-                      ' :oneos_gl_metrics_catch', text)
-
-    def test_guest_auto_pin_confirm_is_true_for_a_guest_pin(self):
-        self.patched()
-        text = self.read(LSS_FILE)
-        got = body(text, ' getBoolean(Ljava/lang/String;ZI)Z')
-        blob = '\n'.join(got)
-        self.assertIn('lockscreen.auto_pin_confirm', blob)
-        self.assertIn('pinLengthForUser', blob)
-        self.assertIn(':oneos_gl_gbool_done', blob)
-
-    def test_guest_pin_length_is_answered_before_the_framework(self):
-        self.patched()
-        text = self.read(LSS_FILE)
-        got = body(text, ' getPinLength(I)I')
-        self.assertEqual(got[:13], [
-            f'invoke-direct {{p0}}, {LSS}->checkHavePermission()V',
-            ':oneos_gl_pin_start',
-            f'invoke-static {{p1}}, {HELPER}->pinLengthForUser(I)I',
-            'move-result v0',
-            'if-ltz v0, :oneos_gl_pin_done',
-            'return v0',
-            ':oneos_gl_pin_end',
-            ':oneos_gl_pin_catch',
-            'move-exception v0',
-            'goto :oneos_gl_pin_done',
-            ':oneos_gl_pin_done',
-            'const/4 p0, -0x1',
-            'return p0',
-        ])
-        self.assertIn('.catch Ljava/lang/Throwable; {:oneos_gl_pin_start .. :oneos_gl_pin_end}'
-                      ' :oneos_gl_pin_catch', text)
+        method = text.split('.method public getCredentialType(I)I\n', 1)[1].split('.end method')[0]
+        self.assertTrue(method.startswith('    .locals 1\n'))
+        self.assertIn(f'invoke-static {{p1, p0}}, {HELPER}->credentialType(II)I', method)
+        self.assertIn('move-exception v0', method)
 
     def test_the_frp_check_of_the_set_path_is_off(self):
         self.patched()
@@ -511,8 +456,7 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(text.count('\n.method '), text.count('\n.end method'))
         helper = SMALI.read_text()
         calls = set(re.findall(re.escape(HELPER) + r'->([A-Za-z]+\([^)]*\)\S+)', text))
-        self.assertEqual({c.split('(')[0] for c in calls},
-                         {'change', 'verify', 'credentialType', 'pinLengthForUser'})
+        self.assertEqual({c.split('(')[0] for c in calls}, {'change', 'verify', 'credentialType', 'hat'})
         for call in calls:
             self.assertRegex(helper, r'(?m)^\.method public static (declared-synchronized )?'
                              + re.escape(call) + '$')
@@ -522,9 +466,31 @@ class PatcherTest(unittest.TestCase):
         self.assertEqual(added.count(f'invoke-direct {{p0, v0, p2}}, {LSS}->notifyLockSettingsStateListeners(ZI)V')
                          + added.count(f'invoke-direct {{p0, v4, p2}}, {LSS}->notifyLockSettingsStateListeners(ZI)V'), 2)
         self.assertGreaterEqual(added.count('.catch Ljava/lang/Throwable;'), 3)
-        for needs in ('->OK:', '->credIncorrect(', '->fromTimeout(', '->requireStrongAuth(II)V',
-                      '->reportSuccessfulStrongAuthUnlock(I)V', '->onCredentialVerified()V'):
+        for needs in ('->credIncorrect(', '->fromTimeout(', '->requireStrongAuth(II)V',
+                      '->reportSuccessfulStrongAuthUnlock(I)V', '->onCredentialVerified()V',
+                      '->setGatekeeperPasswordHandle(J)'):
             self.assertIn(needs, added)
+        # The token answer is in the framework's own handle method, not in the added ones.
+        self.assertIn('->setGatekeeperHAT([B)', text)
+        self.assertIn('->build()' + VCR, text)
+
+    def test_the_handle_of_a_matched_credential_gets_a_token(self):
+        self.patched()
+        got = body(self.read(LSS_FILE), ' verifyGatekeeperPasswordHandle(')
+        self.assertEqual(got[0], 'invoke-static {p1, p2, p5}, ' + HELPER + '->hat(JI)[B')
+        self.assertEqual(got[1], 'move-result-object v0')
+        self.assertEqual(got[2], 'if-eqz v0, :oneos_gl_gk_native')
+        self.assertTrue(any('checkReadPermission()V' in i for i in got),
+                        'every other handle keeps the framework path')
+
+    def test_a_handle_method_with_no_spare_register_gets_one(self):
+        make_tree(self.root, lss=lss_text().replace(
+            'verifyGatekeeperPasswordHandle(JJI)' + VCR + '\n    .locals 3',
+            'verifyGatekeeperPasswordHandle(JJI)' + VCR + '\n    .locals 1'))
+        done = patch(self.root)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        head = self.read(LSS_FILE).split('.method public verifyGatekeeperPasswordHandle', 1)[1]
+        self.assertEqual(head.split('\n', 3)[1].strip(), '.locals 2')
 
     def test_public_helpers_of_the_class_are_called_virtually(self):
         self.patched(lss=lss_text(helpers='public'))
@@ -540,6 +506,8 @@ class PatcherTest(unittest.TestCase):
             'no strong-auth field': dict(lss=lss_text().replace('.field private final mStrongAuth:',
                                                                 '.field private final mAuth:')),
             'no FRP check': dict(lss=lss_text().replace(' enforceFrpNotActive()V', ' frpCheck()V')),
+            'no handle method': dict(lss=lss_text().replace(' verifyGatekeeperPasswordHandle(',
+                                                           ' verifyHandle(')),
             'static verify': dict(lss=lss_text().replace('.method private doVerifyCredential(',
                                                          '.method private static doVerifyCredential(')),
             'no timeout response': dict(lss=lss_text().replace('->fromTimeout(', '->fromError(')),
@@ -645,6 +613,7 @@ public final class GuestLockDriver {
     static int type() { return OneOSGuestLock.credentialType(0, -1); }
     static long check(byte[] c) { return OneOSGuestLock.verify(c, E, W); }
     static int set(int type, byte[] c, byte[] saved) { return OneOSGuestLock.change(type, c, saved, E, W); }
+    static byte[] hat(long h, int u) { return OneOSGuestLock.hat(h, u); }
 
     public static void main(String[] a) throws Exception {
         dir = new File(a[1]);
@@ -667,6 +636,7 @@ public final class GuestLockDriver {
         eq(-1, check(PIN), "no lock: a check is not handled");
         eq(-1, set(-1, null, null), "no lock: a removal is not handled");
         yes(!has(RECORD) && !has(TRIES), "nothing written without a lock");
+        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "no lock: the guest handle gets no token");
         eq(0, set(3, b("123"), null), "three digits are refused");
         eq(0, set(2, PIN, null), "an unknown type is refused");
         eq(0, set(0, PIN, null), "type 0 is refused");
@@ -675,12 +645,13 @@ public final class GuestLockDriver {
 
         eq(1, set(3, PIN, null), "set a PIN");
         eq(3, type(), "the type is PIN");
-        eq(4, OneOSGuestLock.pinLengthForUser(0), "PIN length from the record");
-        eq(-1, OneOSGuestLock.pinLengthForUser(10), "other users keep the native path");
         eq(-1, OneOSGuestLock.credentialType(10, -1), "other users keep the native type");
-        eq(-3, check(b("1")), "one digit: incomplete");
-        yes(!has(TRIES), "incomplete does not count a try");
         eq(0, check(PIN), "the PIN matches");
+        byte[] token = hat(OneOSGuestLock.HANDLE, 0);
+        yes(token != null && token.length == OneOSGuestLock.HAT_LENGTH,
+                "a set lock answers its handle with a token");
+        yes(hat(OneOSGuestLock.HANDLE, 10) == null, "another user: no token");
+        yes(hat(OneOSGuestLock.HANDLE + 1, 0) == null, "another handle: no token");
         eq(1, check(OTHER), "a wrong PIN, no wait yet");
         eq(1, check(null), "null is wrong");
         eq(1, check(new byte[0]), "empty is wrong");
@@ -692,7 +663,7 @@ public final class GuestLockDriver {
         eq(0, set(4, PASS, OTHER), "a change with a wrong old PIN is refused");
         eq(0, set(-1, null, OTHER), "a removal with a wrong old PIN is refused");
         eq(0, set(-1, null, null), "a removal without the old PIN is refused");
-        yes(!has(TRIES), "wrong old PINs in Settings do not touch bouncer tries");
+        yes(text(TRIES).equals("2 0\n"), "wrong old PINs are counted like wrong tries");
         eq(0, set(3, b("12"), PIN), "too short a new PIN is refused");
         eq(3, type(), "still the PIN");
         eq(0, check(PIN), "and it still matches");
@@ -709,6 +680,7 @@ public final class GuestLockDriver {
 
         eq(1, set(-1, null, b("0124")), "removed with the pattern");
         eq(-1, type(), "no lock again");
+        yes(hat(OneOSGuestLock.HANDLE, 0) == null, "removed: no token");
         eq(-1, check(PASS), "a check is not handled again");
         yes(!has(RECORD) && !has(TRIES) && !has(RECORD + ".tmp"), "no files left");
         restart();
@@ -718,7 +690,7 @@ public final class GuestLockDriver {
     static void record() throws Exception {
         eq(1, set(3, PIN, null), "set a PIN");
         String line = text(RECORD);
-        yes(line.matches("1 3 100000 [0-9a-f]{32} [0-9a-f]{64} 4\n"), "record format");
+        yes(line.matches("1 3 100000 [0-9a-f]{32} [0-9a-f]{64}\n"), "record format");
         String[] f = line.trim().split(" ");
         byte[] salt = unhex(f[3]);
         String key = hex(MessageDigest.getInstance("SHA-256").digest(PIN));
@@ -823,7 +795,7 @@ public final class GuestLockDriver {
             good.replaceFirst(" 100000 ", " 99999999999 "),
             good.replaceFirst(" 100000 ", " x "),
             good.trim().substring(0, good.length() - 3) + "\n",   // a short hash
-            good.trim() + " corrupt\n",
+            good.trim() + "00\n",
             good.trim().substring(0, good.length() - 2) + "g\n",  // not hex
             good.trim() + " more\n",
             good.replace(' ', '\t'),
@@ -907,7 +879,10 @@ class HelperTest(unittest.TestCase):
 
 class SourceTest(unittest.TestCase):
     def test_the_smali_belongs_to_the_java_source(self):
-        want = hashlib.sha256(JAVA.read_bytes()).hexdigest()
+        # Git stores this Java source as LF, but Windows checkouts may convert
+        # it to CRLF. The checked-in smali records the canonical LF source hash.
+        source = JAVA.read_bytes().replace(b'\r\n', b'\n')
+        want = hashlib.sha256(source).hexdigest()
         head = SMALI.read_text().split('\n# static fields', 1)[0]
         self.assertIn(f'# from OneOSGuestLock.java (sha256 {want});', head,
                       'run scripts/build-guest-lock-smali.sh after changing the Java source')

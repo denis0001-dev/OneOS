@@ -257,8 +257,9 @@ class PrepareFragment : CardsFragment() {
             }
             val picked = SessionPrefs.picked(ctx)
             if (done && source == SessionPrefs.Source.GZ && picked != null) {
-                Cards.row(run, OuiIcons.drawable.ic_oui_delete_outline, getString(R.string.prepare_delete_gz_title), getString(R.string.prepare_delete_gz_summary, picked.name ?: "")) {
-                    confirmDeleteGz()
+                Cards.row(run, OuiIcons.drawable.ic_oui_delete_outline, getString(R.string.prepare_delete_gz_title),
+                    if (deletingGz) getString(R.string.manage_card_deleting) else getString(R.string.prepare_delete_gz_summary, picked.name ?: "")) {
+                    if (!deletingGz) confirmDeleteGz()
                 }
             }
         }
@@ -288,6 +289,8 @@ class PrepareFragment : CardsFragment() {
                 Cards.row(card, OuiIcons.drawable.ic_oui_close, getString(R.string.tests_stop_title), getString(R.string.prepare_stop_summary)) { PrepareJob.cancel() }
             }
             job.message?.let { Cards.row(card, 0, getString(if (job.phase == PrepareJob.Phase.DONE) R.string.prepare_done else R.string.prepare_not_done), it) }
+            // 0.5.18 (owner): the first session after an update compiles every app (guest_prepare.sh), say so.
+            if (job.phase == PrepareJob.Phase.DONE) Cards.row(card, 0, getString(R.string.prepare_first_session_title), getString(R.string.prepare_first_session_summary))
             job.infos.takeIf { it.isNotEmpty() }?.let { Cards.row(card, 0, getString(R.string.prepare_moved_title), it.joinToString("\n")) }
         }
     }
@@ -383,6 +386,8 @@ class PrepareFragment : CardsFragment() {
     }
 
     /** After a setup, the 5 GB download can go: through the picker's own provider (no storage permission). */
+    @Volatile private var deletingGz = false
+
     private fun confirmDeleteGz() {
         val ctx = requireContext().applicationContext
         val picked = SessionPrefs.picked(ctx) ?: return
@@ -390,8 +395,11 @@ class PrepareFragment : CardsFragment() {
             .setTitle(R.string.prepare_delete_gz_title)
             .setMessage(getString(R.string.prepare_delete_gz_message, picked.name ?: ""))
             .setPositiveButton(R.string.delete) { _, _ ->
+                deletingGz = true
+                redraw()
                 io.execute {
                     val ok = runCatching { DocumentsContract.deleteDocument(ctx.contentResolver, picked.uri) }.getOrDefault(false)
+                    deletingGz = false
                     if (ok) SessionPrefs.clearPicked(ctx)
                     activity?.runOnUiThread {
                         Toast.makeText(ctx, if (ok) R.string.prepare_deleted else R.string.prepare_delete_failed, Toast.LENGTH_SHORT).show()
