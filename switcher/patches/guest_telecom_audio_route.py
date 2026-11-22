@@ -17,14 +17,17 @@ import sys
 
 MARK = "oneos_telecom_audio_route"
 CLASS = re.compile(r"^\.class .+ Landroid/telecom/CallAudioState;$")
-CTOR = re.compile(
-    r"^\.method public constructor <init>\(ZII"
+CTOR_ZII = re.compile(
+    r"^\.method public constructor (?:\w+ )?<init>\(ZII\)V"
+)
+CTOR_FULL = re.compile(
+    r"^\.method public constructor (?:\w+ )?<init>\(ZIILandroid/bluetooth/BluetoothDevice;Ljava/util/Collection;\)V"
 )
 LOCALS = re.compile(r"^(\s*)\.locals (\d+)$")
 
 
-def patch_ctor(path: str, lines: list[str]) -> bool:
-    heads = [i for i, l in enumerate(lines) if CTOR.match(l)]
+def patch_ctor(path: str, lines: list[str], ctor: re.Pattern[str]) -> bool:
+    heads = [i for i, l in enumerate(lines) if ctor.match(l)]
     if len(heads) != 1:
         return False
     h = heads[0]
@@ -70,8 +73,10 @@ def main(root: str) -> None:
         if not CLASS.match(line0):
             continue
         lines = open(path, encoding="utf-8").read().splitlines()
-        if not patch_ctor(path, lines):
-            sys.exit(f"{path}: CallAudioState.<init>(ZII not found")
+        ok = patch_ctor(path, lines, CTOR_ZII)
+        ok = patch_ctor(path, lines, CTOR_FULL) or ok
+        if not ok:
+            sys.exit(f"{path}: CallAudioState.<init>(ZII…) not found")
         open(path, "w", encoding="utf-8").write("\n".join(lines) + "\n")
         touched.append(os.path.relpath(path, root).split(os.sep)[0])
     if not touched:

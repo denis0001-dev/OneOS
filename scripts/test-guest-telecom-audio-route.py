@@ -13,7 +13,7 @@ STUB = """
 .super Ljava/lang/Object;
 .source "CallAudioState.java"
 
-.method public constructor <init>(ZIILjava/lang/String;Ljava/util/Collection;)V
+.method public constructor <init>(ZII)V
     .locals 0
 
     invoke-direct {p0}, Ljava/lang/Object;-><init>()V

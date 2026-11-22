@@ -1846,6 +1846,12 @@ for name in art i18n runtime sdkext nfcservices tethering crashrecovery cellbroa
     fi
 done
 
+if [ -s "$OUT/telephonycore_payload.img" ]; then
+    "$ROOT/scripts/patch-framework-telecom-from-payload.sh" "$OUT/telephonycore_payload.img" "$OUT/framework-telecom_patched.jar"
+else
+    rm -f "$OUT/framework-telecom_patched.jar"
+fi
+
 # OneOS inside the guest (app-android/guest): "Back to One UI" from its screen
 # or its Quick Settings tile. guest_prepare.sh puts it in every guest's /oem as
 # app/OneOSGuest/OneOSGuest.apk, from $STAGE/OneOSGuest.apk. The release build,

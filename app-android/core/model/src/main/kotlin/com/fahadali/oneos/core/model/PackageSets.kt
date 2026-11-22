@@ -419,7 +419,7 @@ object PackageSets {
         // without it Pixel's cover had no cutout, its icons in the camera band and app headers under it.
         files = PIXEL_FILES + pixelHinge("OneOSPixelUnfold.apk") + PackageFile("OneOSFoldCutout.apk", FileRole.RRO),
         omitted = listOf(TETHERING),
-        approxBytes = 708_239_363L,
+        approxBytes = 709_002_373L,
         hasReturnApp = true,
     )
 
@@ -434,7 +434,7 @@ object PackageSets {
         sourceDir = "out/overlays_pixel_kodiak_r20",
         files = PIXEL_FILES + PIXEL_DT2S,
         omitted = listOf(TETHERING),
-        approxBytes = 695_159_961L,
+        approxBytes = 695_922_971L,
         hasReturnApp = true,
     )
 
@@ -445,7 +445,7 @@ object PackageSets {
         sourceDir = "out/overlays_pixel_fold8_r21",
         files = PIXEL_FILES + pixelHinge("Fold8PixelUnfold.apk"),
         omitted = listOf(TETHERING),
-        approxBytes = 708_230_732L,
+        approxBytes = 708_993_742L,
         hasReturnApp = true,
     )
 
@@ -468,7 +468,7 @@ object PackageSets {
             PackageFile("libcameracompatbilityinfo_patched.so", FileRole.GUARD_LIBRARY),
         ),
         omitted = listOf(TETHERING),
-        approxBytes = 703_551_633L,
+        approxBytes = 704_328_215L,
         hasReturnApp = true,
     )
 

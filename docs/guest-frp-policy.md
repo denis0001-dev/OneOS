@@ -21,11 +21,12 @@ Rebuild the set overlay and app:
 
 ```sh
 scripts/bootstrap-pixel9-frp-overlay.sh    # or make-overlays.sh on a GSI tree
-# embed in the APK (no separate download for the jar):
-./gradlew -p app-android :app:assembleFullDebug -Poneos.series=s25 -Poneos.packSets=true
+scripts/release-files.py                   # gh (+ rclone for Drive / SourceForge)
+cd app-android && ./gradlew :app:assembleFullDebug -Poneos.series=s25
+adb install -r app/build/outputs/apk/full/debug/app-full-debug.apk
 ```
 
-After **Prepare** on the phone, the channel ships the patched jar; you do **not**
+After **Prepare** on the phone, the channel delivers the patched jar; you do **not**
 need `scripts/apply-frp-patch-phone.sh` for day-to-day use.
 
 `oneos_switch.sh` still supports an optional attic override when

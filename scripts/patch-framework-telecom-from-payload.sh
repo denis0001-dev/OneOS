@@ -6,7 +6,13 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 PAYLOAD="${1:-$ROOT/app-android/packages/telephonycore_payload.img}"
 OUT="${2:-$ROOT/out/framework-telecom_patched.jar}"
 [ -f "$PAYLOAD" ] || { echo "usage: $0 [telephonycore_payload.img] [out.jar]" >&2; exit 2; }
-DEBUGFS=$(command -v debugfs || echo /usr/sbin/debugfs)
+if [ -z "${DEBUGFS:-}" ] || [ ! -x "$DEBUGFS" ]; then
+    DEBUGFS=$(command -v debugfs 2>/dev/null || true)
+fi
+for cand in "$DEBUGFS" /opt/homebrew/opt/e2fsprogs/sbin/debugfs /usr/local/opt/e2fsprogs/sbin/debugfs /usr/sbin/debugfs; do
+    [ -n "$cand" ] && [ -x "$cand" ] && DEBUGFS=$cand && break
+done
+[ -x "$DEBUGFS" ] || { echo "debugfs not found (brew install e2fsprogs)" >&2; exit 1; }
 APKTOOL=${APKTOOL:-apktool}
 WORK=$(mktemp -d); trap 'rm -rf "$WORK"' EXIT
 "$DEBUGFS" -R "dump /javalib/framework-telecom.jar $WORK/framework-telecom.jar" "$PAYLOAD" 2>/dev/null ||
