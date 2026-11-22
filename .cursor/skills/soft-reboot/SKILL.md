@@ -46,7 +46,7 @@ When the failure is reproducible, land fixes in:
 - `switcher/assets/oneos_switch.sh` — `switch.lock`, soft-reboot cooldown
 - `switcher/assets/reload-guest-ksud.sh` — hotfix paths; add to `oneos_root.sh` SCRIPTS and `RootScript.kt`
 
-Then **android-build** → install APK → **Prepare** on phone.
+Then **run** → **Prepare** on phone.
 
 ## Safe manual soft-reboot (testing)
 

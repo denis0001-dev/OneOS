@@ -48,7 +48,7 @@ Patcher progress:
 - [ ] files.sha256 list: Prepare/finish on device refreshes; repo ships sources + embeds
 - [ ] RootScript.kt + oneos_root.sh SCRIPTS agree on new .sh assets
 - [ ] Relevant scripts/test-*.py or unit tests run
-- [ ] android-build (full + packSets when testing Pixel guest)
+- [ ] run (build + install + launch; packSets when all overlay dirs exist)
 - [ ] adb install -r; user Prepare on phone
 ```
 
@@ -76,6 +76,8 @@ After bytes change, update pins:
 
 **Samsung guest audio usage 1005** (2026-11): `guest_audio_vendor_usage.py` → `framework_patched.jar`; `guest_audio_samsung_strategies.py` → `services_patched.jar`. Register in `make-overlays.sh` / `patch-framework-camera.sh` for the next full rebuild.
 
+**Host fingerprint on Pixel guest** (pixel9-sultra): chain on `services_patched.jar` — `guest_no_biometric_remove.py`, `guest_force_aidl_fingerprint.py` (Pixel uses `public final getProviders` + `move-result p1`), `guest_udfps_location.py`, `guest_seh_touch.py`, `guest_fp_touchwatch.py`. Guards need `# biometric-remove guard` so `guest_prepare.sh` mirrors One UI enrollments. Requires `ONEOS_GUEST_BIOMETRICS=1` (default).
+
 **Do not** reintroduce `host_framework_audio_patched.jar`, Gradle embedding of host `framework.jar`, or bind-mount of host framework in switch/return scripts — deprecated.
 
 Smali helpers: `scripts/check-dex.py`. Patterns: `docs/guest-screen-lock.md`, `docs/guest-frp-policy.md`, `docs/app/patch-catalog.md`.
@@ -92,7 +94,7 @@ cd app-android && ./gradlew :app:assembleFullDebug -Poneos.packSets=true -Poneos
 adb -s "$SERIAL" install -r app/build/outputs/apk/full/debug/app-full-debug.apk
 ```
 
-JDK 21 required; `guest_manager.apk` must exist in `switcher/assets/`. Details: **android-build**.
+JDK 21 required; `guest_manager.apk` must exist in `switcher/assets/`. Details: **run**.
 
 ## Temporary vs permanent
 
@@ -113,6 +115,6 @@ After landing:
 
 ## Related skills
 
-- **android-build** — Gradle, packSets, install.
+- **run** — Gradle, install, launch app.
 - **pr-branch** — branch/PR workflow when patcher work should ship on `try-pr-*`.
 - **soft-reboot** / **reset-state** — device ops after patched APK is installed.

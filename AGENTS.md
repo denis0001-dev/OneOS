@@ -30,7 +30,7 @@ Firmware and IPSW/GSI blobs (when porting): check `~/Documents/Прошивки`
 | Skill | Use when |
 | --- | --- |
 | [patcher](.cursor/skills/patcher/SKILL.md) | Permanent fixes: patchers, assets, hashes, APK land checklist |
-| [android-build](.cursor/skills/android-build/SKILL.md) | `assembleFullDebug`, `packSets`, install, Gradle embed errors |
+| [run](.cursor/skills/run/SKILL.md) | `/run`: build, install, launch OneOS on device (`assembleFullDebug`, packSets, pins) |
 | [device-root-adb](.cursor/skills/device-root-adb/SKILL.md) | `su 0 sh -c`, `nsenter -t 1 -m`, stage mutations |
 | [guest-diagnose](.cursor/skills/guest-diagnose/SKILL.md) | Failed guest boot, switch timeout, return audit, logcat |
 | [reset-state](.cursor/skills/reset-state/SKILL.md) | Same-boot stuck session on One UI, no full reboot |
@@ -39,7 +39,7 @@ Firmware and IPSW/GSI blobs (when porting): check `~/Documents/Прошивки`
 | [screencap](.cursor/skills/screencap/SKILL.md) | Fresh UI screenshot via adb (never reuse stale PNGs) |
 | [pr-branch](.cursor/skills/pr-branch/SKILL.md) | `upstream` / `try-pr-*` sync and PR hygiene |
 
-Invoke patcher/android-build flows when the user says **/patcher**, **patcher mode**, or asks to make a device hotfix permanent.
+Invoke patcher/**run** when the user says **/patcher**, **patcher mode**, or **/run** (build + install + launch).
 
 ## Shell search and discovery
 
@@ -103,14 +103,13 @@ Wire new patchers in `scripts/make-overlays.sh` / `patch-framework-camera.sh` so
 - “Fix on phone only” under `$STAGE` without the same change in `switcher/` + pins + APK.
 - Committing multi-megabyte host framework pulls under `app-android/packages/` unless the user explicitly requests it.
 
-## Build, install, Prepare
+## Build, install, launch (/run)
 
 ```bash
-export JAVA_HOME=/opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home
-cd app-android
-./gradlew :app:assembleFullDebug -Poneos.series=s25 -Poneos.packSets=true
-adb -s "$SERIAL" install -r app/build/outputs/apk/full/debug/app-full-debug.apk
+.cursor/skills/run/scripts/run-oneos.sh
 ```
+
+See **run** skill for `--series`, `--pack-sets`, and `SERIAL`. User should **Prepare** after script or overlay changes.
 
 - **`guest_manager.apk`** must exist (`scripts/build-guest-manager.sh --debug`).
 - After install, the user should tap **Prepare** on the device so stage scripts and embed hashes refresh.

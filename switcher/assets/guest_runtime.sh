@@ -38,6 +38,29 @@ restore_host_root_from_baseline() {
         esac
     done < "$B/root"
 }
+capture_grant_packages() {
+    B=$1
+    bu=$2
+    [ -f "$B/root" ] || return 0
+    : > "$B/grant-packages.txt"
+    while read -r kind uid _; do
+        case "$kind" in
+            allow)
+                pkg=$("$bu" awk -v u="$uid" '$2 == u { print $1; exit }' /data/system/packages.list 2>/dev/null)
+                [ -n "$pkg" ] || continue
+                echo "$pkg" >> "$B/grant-packages.txt"
+                "$S/guest_root" --host-grant "$pkg" 2>/dev/null || true
+                ;;
+        esac
+    done < "$B/root"
+}
+restore_packages_from_baseline() {
+    B=$1
+    [ -f "$B/grant-packages.txt" ] || return 0
+    while read -r pkg; do
+        [ -n "$pkg" ] && "$S/guest_root" --host-grant "$pkg" 2>/dev/null || true
+    done < "$B/grant-packages.txt"
+}
 sync_host_root_from_baseline() {
     B=$1
     bu=$2
@@ -46,6 +69,7 @@ sync_host_root_from_baseline() {
     n=0
     while [ $n -lt 2 ]; do
         restore_host_root_from_baseline "$B" "$bu" || true
+        restore_packages_from_baseline "$B" || true
         n=$((n + 1))
     done
 }
@@ -197,6 +221,13 @@ baseline)
         [ ! -x "$x" ] || { busy=$x; break; }
     done
     [ -n "$busy" ] || exit 1
+    "$S/guest_root" --host-grant-core 2>/dev/null || true
+    if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/root.unsorted" 2>"$B/audit.err"; then
+        echo 'Guest runtime: live root-provider audit failed or timed out' >&2
+        exit 1
+    fi
+    sort "$B/root.unsorted" > "$B/root"
+    capture_grant_packages "$B" "$busy"
     # Keep the host's persisted list intact even if an older kernel prunes its
     # live table after seeing a guest package event. Keep this read-only bind
     # until reboot on an audit failure; remove it only after a matching audit.
@@ -234,11 +265,6 @@ baseline)
             ;;
         esac
     done
-    if ! "$busy" timeout 90 "$S/guest_root" --host-audit > "$B/root.unsorted" 2>"$B/audit.err"; then
-        echo 'Guest runtime: live root-provider audit failed or timed out' >&2
-        exit 1
-    fi
-    sort "$B/root.unsorted" > "$B/root"
     sha256sum /sys/fs/selinux/policy > "$B/selinux" || exit 0
     awk '{print $1, $2, $6}' /proc/modules | sort > "$B/kernel-modules"
     if [ -f /data/adb/ksu/.allowlist ]; then sha256sum /data/adb/ksu/.allowlist > "$B/allowlist"; fi

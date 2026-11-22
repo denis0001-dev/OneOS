@@ -21,7 +21,8 @@
 # 0.5.01: framework_patched.jar + guest_secims_ready.py (Samsung IMS hears telephony is ready for a call's callbacks once telephony attaches to the session: calls end in the guest)
 # 0.5.34: services_patched.jar + guest_local_lock.py (guest screen lock on komodo Pixel sets)
 # guest audio: framework_patched.jar + guest_audio_vendor_usage.py; services_patched.jar + guest_audio_samsung_strategies.py (Invalid usage 1005, 2026-11-22)
-6d506f0f787f906e52084cde094e50dd5968d429743ee674893b6d611536b573  services_patched.jar
+# biometric-remove guard: services_patched.jar never removes a fingerprint or face template (patches/guest_no_biometric_remove.py); the fingerprint sensor through AIDL (patches/guest_force_aidl_fingerprint.py); in-display sensor place (patches/guest_udfps_location.py); Samsung optical touch (patches/guest_seh_touch.py, guest_fp_touchwatch.py)
+3d4d26a65118862f7b1e5fa17244be8f66787e382235d1a224e414ad001948b5  services_patched.jar
 607ae15ccbe753fb25ef8e3d40f72a3ec8a2243dc3828adea78089731eca64aa  vold_patched
 8f76de6d0c7c74e6526efc7678ae81b1cf344121f39b3d27e618116ed5d41f51  service.incremental_patched.so
 f5d6b13039b44000e4118feb52fcac4335b72c055d59d55d38501959ae88ce8c  framework_patched.jar

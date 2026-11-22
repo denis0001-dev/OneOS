@@ -19,6 +19,9 @@ class VerifyReturnRestoreTest(unittest.TestCase):
 
     def test_drift_restores_from_switch_baseline(self):
         self.assertIn("restore_host_root_from_baseline", RUNTIME)
+        self.assertIn("restore_packages_from_baseline", RUNTIME)
+        self.assertIn("capture_grant_packages", RUNTIME)
+        self.assertIn("grant-packages.txt", RUNTIME)
         self.assertIn("sync_host_root_from_baseline", RUNTIME)
         self.assertIn("release_allowlist_protection", RUNTIME)
         self.assertIn("restore-host-grants)", RUNTIME)

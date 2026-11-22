@@ -367,6 +367,15 @@ done
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_local_lock.py" "$WORK/services")"
 # Guest lock enrolment token for Settings (patches/guest_local_lock_hat.py; jars built before 0.5.17).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_local_lock_hat.py" "$WORK/services")"
+# One UI's fingerprint/face templates: no removal, AIDL HAL on Samsung hosts, UDFPS
+# place and Samsung optical touch (patches/guest_no_biometric_remove.py,
+# guest_force_aidl_fingerprint.py, guest_udfps_location.py, guest_seh_touch.py,
+# guest_fp_touchwatch.py).
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_no_biometric_remove.py" "$WORK/services")"
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_force_aidl_fingerprint.py" "$WORK/services")"
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_udfps_location.py" "$WORK/services")"
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_seh_touch.py" "$WORK/services")"
+KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_fp_touchwatch.py" "$WORK/services")"
 # The guest's own idmap2d instead of One UI's (patches/guest_own_idmap.py).
 KEY_DIRS="$KEY_DIRS $(python3 -I "$ROOT/switcher/patches/guest_own_idmap.py" "$WORK/services")"
 # A WebView zygote that cannot start is logged, not fatal (S24 Ultra, Find X9

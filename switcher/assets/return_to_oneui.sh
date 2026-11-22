@@ -585,6 +585,10 @@ if [ -f /data/local/tmp/oneos/data/oneos_root/enabled ]; then
     if ! STAGE=/data/local/tmp/oneos /system/bin/sh /data/local/tmp/oneos/guest_runtime.sh restore-host-grants; then
         echo "Guest full-stack runtime: host grant restore failed (KernelSU may need a manual toggle)"
     fi
+    if [ -x /data/local/tmp/oneos/host_ksu_grants.sh ]; then
+        STAGE=/data/local/tmp/oneos /system/bin/sh /data/local/tmp/oneos/host_ksu_grants.sh \
+            || echo "Guest full-stack runtime: host_ksu_grants failed"
+    fi
 fi
 # verify-return + restore-host-grants re-apply live KSU grants the kernel pruned in the guest.
 # OneOS: return by rebooting unless asked otherwise. Restarting One UI in place
@@ -1144,6 +1148,14 @@ while :; do
     [ $up -gt 0 ] && [ $t -ge $((up + 30)) ] && break
     [ $up = 0 ] && [ $t -ge 180 ] && failsafe "user 0 not unlocked within 180 s"
 done
+
+if [ -f "$S/data/oneos_root/enabled" ]; then
+    STAGE=$S /system/bin/sh "$S/guest_runtime.sh" restore-host-grants \
+        || say "KSU grant restore after One UI up failed"
+    if [ -x "$S/host_ksu_grants.sh" ]; then
+        STAGE=$S /system/bin/sh "$S/host_ksu_grants.sh" || say "host_ksu_grants after One UI up failed"
+    fi
+fi
 
 exec 9<&-
 ip rule show 2>/dev/null | "$BB" diff "$BASE/iprule" - >> "$IPLOG" 2>&1 || say "!!! ip rules differ from the switch (diff in return_inplace.log)"

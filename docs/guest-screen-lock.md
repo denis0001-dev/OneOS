@@ -58,7 +58,7 @@ The guest starts without a lock the next time.
 | Nothing OS | `nothing-f8u`, nothing r33 | 0.4.95 |
 | OriginOS | `originos`, originos_cn r18 | 0.4.95 |
 | Infinity-X | `infinityx` | after 0.4.96 (`2edec71`) |
-| Pixel 9 Pro XL (komodo) | `pixel9-sultra` | 0.5.34 (`patch-built-jar.sh` on komodo r20 `services_patched.jar`) |
+| Pixel 9 Pro XL (komodo) | `pixel9-sultra` | 0.5.34 guest lock; host fingerprint unlock with the biometric patch chain (`guest_force_aidl_fingerprint.py` et al., 2026-11-22) |
 
 The 0.4.95 sets were made with `scripts/patch-built-jar.sh` from the jars of the revision before
 (only `services_patched.jar` and the hash list differ) and had not run on a phone when they were

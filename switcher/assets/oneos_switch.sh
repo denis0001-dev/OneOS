@@ -874,6 +874,9 @@ fi
 echo "preflight: return baseline start $(date +%T)"
 /system/bin/sh "$STAGE/return_to_oneui.sh" baseline
 echo "preflight: return baseline done $(date +%T)"
+echo "preflight: host KernelSU grants start $(date +%T)"
+/system/bin/sh "$STAGE/host_ksu_grants.sh" || echo "preflight: host KernelSU grants skipped or failed"
+echo "preflight: host KernelSU grants done $(date +%T)"
 echo "preflight: guest baseline start $(date +%T)"
 STAGE="$STAGE" /system/bin/sh "$STAGE/guest_runtime.sh" baseline || {
     echo 'Guest root baseline failed before stopping One UI; switch cancelled'

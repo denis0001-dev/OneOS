@@ -128,6 +128,7 @@ val packedSets: Set<String> = if (seriesId == null) {
 // installd table). oneos_tunnel.sh (the server tunnel) and 7zz are never shipped.
 val sessionScriptsBase: Map<String, File> = linkedMapOf(
     "guest_runtime.sh" to File(repoRoot, "switcher/assets/guest_runtime.sh"),
+    "host_ksu_grants.sh" to File(repoRoot, "switcher/assets/host_ksu_grants.sh"),
     "guest_root" to File(repoRoot, "switcher/assets/guest_root"),
     "guest_zygiskd" to File(repoRoot, "switcher/assets/guest_zygiskd"),
     "guest_zygisk_ptrace" to File(repoRoot, "switcher/assets/guest_zygisk_ptrace"),

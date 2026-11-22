@@ -39,4 +39,4 @@ Use `gh` against **upstream** or fork per your layout; follow repo commit style 
 ## Related
 
 - **patcher** — land device fixes in tree before PR.
-- **android-build** — verify APK after merge.
+- **run** — verify APK after merge.

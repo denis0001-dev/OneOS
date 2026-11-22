@@ -21,43 +21,48 @@ import os
 import re
 import sys
 
-METHOD = """.method private getProviders(Landroid/hardware/fingerprint/FingerprintSensorConfigurations;)Ljava/util/List;
-    .locals 4
-"""
-METHOD_NEW = """.method private getProviders(Landroid/hardware/fingerprint/FingerprintSensorConfigurations;)Ljava/util/List;
-    .locals 5
-"""
+GET_PROVIDERS = re.compile(
+    r"^\.method (?:private |public final )getProviders\("
+    r"Landroid/hardware/fingerprint/FingerprintSensorConfigurations;\)Ljava/util/List;",
+    re.M,
+)
+LOCALS = re.compile(r"^(\s*)\.locals (\d+)\s*$", re.M)
 
-# The read sits in a different .line block per image (ColorOS 1201, HyperOS
-# 1182); match the instruction, not its line number.
+# ColorOS/HyperOS: move-result v3; Pixel/AOSP: move-result p1 (and a public getProviders).
 INVOKE = re.compile(
     r"(?m)^(?P<indent>[ \t]*)"
     r"invoke-virtual \{p1\}, Landroid/hardware/fingerprint/FingerprintSensorConfigurations;->"
     r"getResetLockoutRequiresHardwareAuthToken\(\)Z[ \t]*\n"
     r"(?:[ \t]*\n)?"
-    r"(?P<move>[ \t]*)move-result v3[ \t]*\n"
+    r"(?P<move>[ \t]*)move-result (?P<reg>v\d+|p\d+)[ \t]*\n"
 )
-NEW = """{indent}# OneOS: the image's flag names its own HAL's transport (false = HIDL 2.1).
+
+
+def aidl_transport_block(indent, flag_reg, scratch):
+    """scratch is a v* register not used by the flag read's original path."""
+    one = f"{indent}:oneos_fingerprint_hidl"
+    two = f"{indent}:oneos_fingerprint_transport"
+    return f"""{indent}# OneOS: the image's flag names its own HAL's transport (false = HIDL 2.1).
 {indent}# Ask the phone instead: the AIDL instance is there on every AIDL HAL, and
 {indent}# its absence leaves a HIDL image with the value it shipped.
-{indent}const-string v4, "android.hardware.biometrics.fingerprint.IFingerprint/default"
+{indent}const-string {scratch}, "android.hardware.biometrics.fingerprint.IFingerprint/default"
 
-{indent}invoke-static {{v4}}, Landroid/os/ServiceManager;->getService(Ljava/lang/String;)Landroid/os/IBinder;
+{indent}invoke-static {{{scratch}}}, Landroid/os/ServiceManager;->getService(Ljava/lang/String;)Landroid/os/IBinder;
 
-{indent}move-result-object v4
+{indent}move-result-object {scratch}
 
-{indent}if-eqz v4, :oneos_fingerprint_hidl
+{indent}if-eqz {scratch}, {one}
 
-{indent}const/4 v3, 0x1
+{indent}const/4 {flag_reg}, 0x1
 
-{indent}goto :oneos_fingerprint_transport
+{indent}goto {two}
 
-{indent}:oneos_fingerprint_hidl
+{one}
 {indent}invoke-virtual {{p1}}, Landroid/hardware/fingerprint/FingerprintSensorConfigurations;->getResetLockoutRequiresHardwareAuthToken()Z
 
-{indent}move-result v3
+{indent}move-result {flag_reg}
 
-{indent}:oneos_fingerprint_transport
+{two}
 """
 
 
@@ -69,19 +74,65 @@ def find(root, rel_suffix):
     return hits[0]
 
 
+def pick_scratch(flag_reg, locals_n):
+    used = {flag_reg, "p0", "p1", "v0", "v1"}
+    if flag_reg.startswith("v"):
+        used.add(flag_reg)
+    for n in range(locals_n):
+        r = f"v{n}"
+        if r not in used:
+            return r
+    return f"v{locals_n}"
+
+
+def bump_locals(src, method_start, need_at_least):
+    """Raise .locals inside getProviders to cover scratch registers."""
+    m = GET_PROVIDERS.search(src, method_start)
+    if not m:
+        return src
+    head = src[m.start():m.end()]
+    loc = LOCALS.search(src, m.end())
+    if not loc:
+        sys.exit("getProviders: no .locals line")
+    n = int(loc.group(2))
+    if n >= need_at_least:
+        return src
+    rep = f"{loc.group(1)}.locals {need_at_least}\n"
+    return src[:loc.start()] + rep + src[loc.end():]
+
+
 def main(root):
     rel = os.path.join("com", "android", "server", "biometrics", "sensors",
                        "fingerprint", "FingerprintService.smali")
     path = find(root, rel)
     src = open(path).read()
-    if src.count(METHOD) != 1:
-        sys.exit(f"{rel}: getProviders is not there once with .locals 4")
-    hits = list(INVOKE.finditer(src))
+    if GET_PROVIDERS.search(src) is None:
+        sys.exit(f"{rel}: getProviders(FingerprintSensorConfigurations) not found")
+    m_gp = GET_PROVIDERS.search(src)
+    method_slice = src[m_gp.start():]
+    hits = list(INVOKE.finditer(method_slice))
     if len(hits) != 1:
-        sys.exit(f"{rel}: the getResetLockoutRequiresHardwareAuthToken read is not there once (found {len(hits)})")
-    m = hits[0]
-    src = src[:m.start()] + NEW.format(indent=m.group("indent")) + src[m.end():]
-    src = src.replace(METHOD, METHOD_NEW, 1)
+        sys.exit(f"{rel}: the getResetLockoutRequiresHardwareAuthToken read is not there once in getProviders (found {len(hits)})")
+    h = hits[0]
+    abs_start = m_gp.start() + h.start()
+    abs_end = m_gp.start() + h.end()
+    flag_reg = h.group("reg")
+    loc_m = LOCALS.search(src, m_gp.end())
+    locals_n = int(loc_m.group(2)) if loc_m else 4
+    scratch = pick_scratch(flag_reg, locals_n)
+    need = max(locals_n, int(scratch[1:]) + 1) + 1
+    src = bump_locals(src, m_gp.start(), need)
+    # offsets may have shifted if .locals grew
+    m_gp = GET_PROVIDERS.search(src)
+    method_slice = src[m_gp.start():]
+    hits = list(INVOKE.finditer(method_slice))
+    h = hits[0]
+    abs_start = m_gp.start() + h.start()
+    abs_end = m_gp.start() + h.end()
+    flag_reg = h.group("reg")
+    scratch = pick_scratch(flag_reg, need)
+    block = aidl_transport_block(h.group("indent"), flag_reg, scratch)
+    src = src[:abs_start] + block + src[abs_end:]
     open(path, "w").write(src)
     print("FingerprintService.getProviders: AIDL sensor when the AIDL HAL is registered, "
           "the image's flag otherwise", file=sys.stderr)
