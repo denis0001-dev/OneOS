@@ -58,13 +58,12 @@ The guest starts without a lock the next time.
 | Nothing OS | `nothing-f8u`, nothing r33 | 0.4.95 |
 | OriginOS | `originos`, originos_cn r18 | 0.4.95 |
 | Infinity-X | `infinityx` | after 0.4.96 (`2edec71`) |
+| Pixel 9 Pro XL (komodo) | `pixel9-sultra` | 0.5.34 (`patch-built-jar.sh` on komodo r20 `services_patched.jar`) |
 
 The 0.4.95 sets were made with `scripts/patch-built-jar.sh` from the jars of the revision before
 (only `services_patched.jar` and the hash list differ) and had not run on a phone when they were
 uploaded. Infinity-X was added after 0.4.96: its public verification and credential-type wrappers
-use no local registers and reuse `p0` for the result, shapes the patcher now supports. Not yet: the
-Pixel sets and OxygenOS 16; their remaining framework differences still leave the guest without a
-screen lock.
+use no local registers and reuse `p0` for the result, shapes the patcher now supports. Not yet: the other Pixel images (Fold / Pixel 11) and OxygenOS 16 unless rebuilt the same way.
 
 ## How it is built
 

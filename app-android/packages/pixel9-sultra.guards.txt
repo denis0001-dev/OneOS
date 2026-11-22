@@ -19,7 +19,8 @@
 # 0.4.64: services_patched.jar + guest_soundtrigger_no_reboot.py (a refused sound model does not reboot One UI's audio HAL)
 # 0.5.00: services_patched.jar + guest_pdb_frp_writes_fail.py (with One UI's FRP active a guest PDB write fails as an I/O error instead of killing system_server's main thread: no black screen at the first start)
 # 0.5.01: framework_patched.jar + guest_secims_ready.py (Samsung IMS hears telephony is ready for a call's callbacks once telephony attaches to the session: calls end in the guest)
-1487023a74a82160c8334ffeb276d1f2e3b7ce9b2f46b4af4447cc86e4902836  services_patched.jar
+# 0.5.34: services_patched.jar + guest_local_lock.py (guest screen lock on komodo Pixel sets)
+21862a5fe50ccfd5bace1d9b0d13575e9748401994edcc1a88dd2e0cc795dfb4  services_patched.jar
 607ae15ccbe753fb25ef8e3d40f72a3ec8a2243dc3828adea78089731eca64aa  vold_patched
 8f76de6d0c7c74e6526efc7678ae81b1cf344121f39b3d27e618116ed5d41f51  service.incremental_patched.so
 107584dbfb0b85939745a10a6ce39bbd722ce10a1e39c95cd9102e2f7e1db4a4  framework_patched.jar

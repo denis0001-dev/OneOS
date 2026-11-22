@@ -169,7 +169,10 @@ val sessionScripts: Map<String, File> = linkedMapOf(
     // 0.4.66: One UI 8.5's table, staged as host_installd.txt for SDK 36 (Android 16) images.
     "host_installd_a16.txt" to File(repoRoot, "switcher/patches/host_installd_a16.txt"),
 )
-val switcherNotShipped = setOf("oneos_tunnel.sh", "7zz")
+val switcherNotShipped = setOf(
+    "oneos_tunnel.sh", "7zz",
+    "guest_bind_patched_jars.sh", "live-guest-lock-reload.sh", "reload-guest-keyguard.sh",
+)
 
 /** `<sha256>  <name>` lines (`#` comments skipped), as sha256sum writes them. */
 fun readShaList(f: File): Map<String, String> {

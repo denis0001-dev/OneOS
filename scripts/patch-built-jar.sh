@@ -14,7 +14,10 @@ APKTOOL=${APKTOOL:-$(ls "$ROOT"/mysticgsi/tools/apktool/*.jar 2>/dev/null | head
 if [ -z "$APKTOOL" ]; then
     APKTOOL=apktool
 fi
-JAR=$(realpath "$JAR"); PATCHER=$(realpath "$PATCHER"); OUT=$(realpath -m "$OUT")
+JAR=$(cd "$(dirname "$JAR")" && pwd)/$(basename "$JAR")
+PATCHER=$(cd "$(dirname "$PATCHER")" && pwd)/$(basename "$PATCHER")
+mkdir -p "$(dirname "$OUT")"
+OUT=$(cd "$(dirname "$OUT")" && pwd)/$(basename "$OUT")
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 case "$APKTOOL" in
     *.jar) run_apktool() { java -jar "$APKTOOL" "$@"; } ;;
@@ -23,7 +26,23 @@ esac
 run_apktool d -q -f -r -o "$W/src" "$JAR"
 DIRS=$(python3 -I "$PATCHER" "$W/src")
 [ -n "$DIRS" ] || { echo "$PATCHER changed nothing" >&2; exit 1; }
-run_apktool b -q -o "$W/rebuilt.jar" "$W/src"
+if ! run_apktool b -q -o "$W/rebuilt.jar" "$W/src" 2> "$W/apktool.err"; then
+    FULL=$(sed -n 's/.*Could not smali folder: \(smali[_a-z0-9]*\).*/\1/p' "$W/apktool.err" | head -1)
+    if [ -z "$FULL" ] || ! grep -q 'Unsigned short value out of range' "$W/apktool.err" ||
+       [ -z "$(cd "$W/src/$FULL" && find . -name 'OneOS*.smali' 2>/dev/null)" ]; then
+        cat "$W/apktool.err" >&2
+        exit 1
+    fi
+    LAST=$(ls -d "$W"/src/smali_classes* 2>/dev/null | sed 's/.*smali_classes//' | sort -n | tail -1)
+    OWN="smali_classes$((${LAST:-1} + 1))"
+    (cd "$W/src/$FULL" && find . -name 'OneOS*.smali') | while read -r f; do
+        mkdir -p "$W/src/$OWN/$(dirname "$f")"
+        mv "$W/src/$FULL/$f" "$W/src/$OWN/$f"
+        echo "services.jar: $FULL is past 65536 method references, $f moved to $OWN"
+    done
+    DIRS="$DIRS $OWN"
+    run_apktool b -q -o "$W/rebuilt.jar" "$W/src"
+fi
 cp "$JAR" "$W/out.jar"
 for d in $DIRS; do
     DEX="$(echo "$d" | sed 's/^smali_//; s/^smali$/classes/').dex"
